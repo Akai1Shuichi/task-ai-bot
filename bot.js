@@ -1,0 +1,207 @@
+import TelegramBot from "node-telegram-bot-api";
+import dotenv from "dotenv";
+import fs from "fs";
+import { spawn } from "child_process";
+
+dotenv.config();
+
+const token = process.env.TELEGRAM_BOT_TOKEN;
+const allowed = String(process.env.ALLOWED_CHAT_ID);
+const bot = new TelegramBot(token, { polling: true });
+const TELEGRAM_LIMIT = 3900;
+const EDIT_INTERVAL_MS = 1200;
+const RUN_TIMEOUT_MS = 1000 * 60 * 30;
+
+function auth(msg) {
+  return String(msg.chat.id) === allowed;
+}
+
+function readTodo() {
+  return fs.readFileSync("./todo.md", "utf8");
+}
+
+function findTask(id) {
+  const lines = readTodo().split("\n");
+  return lines.find((x) => x.trim().startsWith(id));
+}
+
+function trimForTelegram(text, limit = TELEGRAM_LIMIT) {
+  if (!text) return "";
+  if (text.length <= limit) return text;
+  return `...${text.slice(text.length - limit + 3)}`;
+}
+
+function stripAnsi(text) {
+  return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+}
+
+function extractCodexEventText(event) {
+  if (!event || typeof event !== "object") return "";
+
+  const direct = event.message || event.text || event.delta || event.output;
+  if (typeof direct === "string") return direct;
+
+  const item = event.item || event.data || event.msg;
+  if (item && typeof item === "object") {
+    const itemText =
+      item.text ||
+      item.delta ||
+      item.message ||
+      item.output ||
+      item.aggregated_output ||
+      "";
+    if (typeof itemText === "string") return itemText;
+
+    const command = item.command || item.cmd || item.arguments?.cmd;
+    if (typeof command === "string") {
+      const exit =
+        item.exit_code === undefined && item.exitCode === undefined
+          ? ""
+          : ` (exit ${item.exit_code ?? item.exitCode})`;
+      return `${event.type === "item.started" ? "Running" : "Finished"}: ${command}${exit}`;
+    }
+  }
+
+  if (event.type === "turn.started") return "Codex started.";
+  if (event.type === "turn.completed") return "Codex finished.";
+
+  return "";
+}
+
+function createCodexOutputParser(onText) {
+  let pending = "";
+
+  return (chunk) => {
+    pending += chunk;
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() || "";
+
+    for (const line of lines) {
+      const cleanLine = stripAnsi(line).trim();
+      if (!cleanLine) continue;
+
+      try {
+        const event = JSON.parse(cleanLine);
+        const text = extractCodexEventText(event);
+        if (text) onText(stripAnsi(String(text)));
+      } catch {
+        onText(cleanLine);
+      }
+    }
+  };
+}
+
+async function safeEditMessage(chatId, messageId, text) {
+  try {
+    await bot.editMessageText(trimForTelegram(text) || "Running...", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  } catch (err) {
+    const description = err?.response?.body?.description || err?.message || "";
+    if (!description.includes("message is not modified")) {
+      console.error("Failed to edit Telegram message:", description);
+    }
+  }
+}
+
+async function sendLongMessage(chatId, text) {
+  const clean = text || "Done";
+  for (let i = 0; i < clean.length; i += TELEGRAM_LIMIT) {
+    await bot.sendMessage(chatId, clean.slice(i, i + TELEGRAM_LIMIT));
+  }
+}
+
+async function runCodexRealtime(chatId, task) {
+  const prompt = `Read todo.md and complete task ${task}`;
+  const liveMessage = await bot.sendMessage(chatId, `Running ${task}\n\nStarting Codex...`);
+  const args = ["exec", "--skip-git-repo-check", "--ephemeral", "--json", prompt];
+  const child = spawn("codex", args, {
+    cwd: process.cwd(),
+    env: process.env,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let output = "";
+  let lastEdit = 0;
+  let finished = false;
+  let flushTimer = null;
+
+  const flush = async (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastEdit < EDIT_INTERVAL_MS) return;
+    lastEdit = now;
+    await safeEditMessage(
+      chatId,
+      liveMessage.message_id,
+      `Running ${task}\n\n${trimForTelegram(output) || "Waiting for output..."}`,
+    );
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer || finished) return;
+    flushTimer = setTimeout(async () => {
+      flushTimer = null;
+      await flush();
+    }, EDIT_INTERVAL_MS);
+  };
+
+  const append = (text) => {
+    output += text.endsWith("\n") ? text : `${text}\n`;
+    scheduleFlush();
+  };
+
+  const parseStdout = createCodexOutputParser(append);
+  const parseStderr = createCodexOutputParser(append);
+
+  child.stdout.on("data", (chunk) => parseStdout(chunk.toString("utf8")));
+  child.stderr.on("data", (chunk) => parseStderr(chunk.toString("utf8")));
+
+  const timeout = setTimeout(() => {
+    append(`Codex timed out after ${RUN_TIMEOUT_MS / 60000} minutes.`);
+    child.kill("SIGTERM");
+  }, RUN_TIMEOUT_MS);
+
+  child.on("error", (err) => {
+    append(`Failed to start Codex: ${err.message}`);
+  });
+
+  child.on("close", async (code, signal) => {
+    finished = true;
+    clearTimeout(timeout);
+    if (flushTimer) clearTimeout(flushTimer);
+
+    const status =
+      code === 0
+        ? "Done"
+        : `Stopped${signal ? ` by ${signal}` : ""}${code === null ? "" : ` with code ${code}`}`;
+    const finalText = `${status}: ${task}\n\n${trimForTelegram(output) || "No output."}`;
+    await safeEditMessage(chatId, liveMessage.message_id, finalText);
+
+    if (output.length > TELEGRAM_LIMIT) {
+      await sendLongMessage(chatId, output);
+    }
+  });
+}
+
+bot.onText(/\/start/, (msg) => {
+  if (!auth(msg)) return;
+  bot.sendMessage(msg.chat.id, "Ready. Use /tasks or /run 1.1");
+});
+
+bot.onText(/\/tasks/, (msg) => {
+  if (!auth(msg)) return;
+  bot.sendMessage(msg.chat.id, readTodo());
+});
+
+bot.onText(/\/run (.+)/, (msg, match) => {
+  if (!auth(msg)) return;
+  const id = match[1].trim();
+  const task = findTask(id);
+  if (!task) return bot.sendMessage(msg.chat.id, "Task not found");
+
+  runCodexRealtime(msg.chat.id, task).catch((err) => {
+    bot.sendMessage(msg.chat.id, `Failed to run Codex: ${err.message}`);
+  });
+});
