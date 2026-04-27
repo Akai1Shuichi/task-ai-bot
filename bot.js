@@ -13,6 +13,8 @@ const TELEGRAM_LIMIT = 3900;
 const EDIT_INTERVAL_MS = 1200;
 const RUN_TIMEOUT_MS = 1000 * 60 * 30;
 const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
+const CODEX_SESSION_PATH = path.resolve(process.cwd(), ".codex-session.json");
+let activeCodexRun = null;
 
 function auth(msg) {
   return String(msg.chat.id) === allowed;
@@ -38,6 +40,47 @@ function getTodoPath() {
 
 function readTodo() {
   return fs.readFileSync(getTodoPath(), "utf8");
+}
+
+function isCodexThreadId(value) {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  );
+}
+
+function readCodexSession(projectPath) {
+  try {
+    const state = JSON.parse(fs.readFileSync(CODEX_SESSION_PATH, "utf8"));
+    if (state.projectPath !== projectPath) return null;
+    if (!isCodexThreadId(state.threadId)) return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function saveCodexSession(projectPath, threadId) {
+  if (!isCodexThreadId(threadId)) return;
+
+  const state = {
+    projectPath,
+    threadId,
+    updatedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(CODEX_SESSION_PATH, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+function clearCodexSession() {
+  try {
+    fs.unlinkSync(CODEX_SESSION_PATH);
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("Failed to clear Codex session state:", err.message);
+    }
+  }
 }
 
 function findTask(id) {
@@ -96,7 +139,12 @@ function extractCodexEventText(event) {
   return "";
 }
 
-function createCodexOutputParser(onText) {
+function extractCodexThreadId(event) {
+  if (!event || typeof event !== "object") return "";
+  return event.thread_id || event.session_id || event.payload?.id || "";
+}
+
+function createCodexOutputParser(onText, onEvent) {
   let pending = "";
 
   return (chunk) => {
@@ -110,6 +158,7 @@ function createCodexOutputParser(onText) {
 
       try {
         const event = JSON.parse(cleanLine);
+        if (onEvent) onEvent(event);
         const text = extractCodexEventText(event);
         if (text) onText(stripAnsi(String(text)));
       } catch {
@@ -144,19 +193,30 @@ async function runCodexRealtime(chatId, task) {
   const projectPath = getProjectPath();
   const todoPath = getTodoPath();
   const prompt = `Read ${todoPath} and complete task ${task}`;
+  const savedSession = readCodexSession(projectPath);
   const liveMessage = await bot.sendMessage(
     chatId,
-    `Running ${task}\n\nStarting Codex...`,
+    `Running ${task}\n\n${
+      savedSession ? "Resuming Codex session..." : "Starting Codex session..."
+    }`,
   );
-  const args = [
-    "exec",
-    "--skip-git-repo-check",
-    "--sandbox",
-    "workspace-write",
-    "--ephemeral",
-    "--json",
-    prompt,
-  ];
+  const args = savedSession
+    ? [
+        "exec",
+        "resume",
+        "--skip-git-repo-check",
+        "--json",
+        savedSession.threadId,
+        prompt,
+      ]
+    : [
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "--json",
+        prompt,
+      ];
   const child = spawn("codex", args, {
     cwd: projectPath,
     env: process.env,
@@ -168,6 +228,8 @@ async function runCodexRealtime(chatId, task) {
   let lastEdit = 0;
   let finished = false;
   let flushTimer = null;
+  let activeThreadId = savedSession?.threadId || "";
+  let sessionLineAdded = false;
 
   const flush = async (force = false) => {
     const now = Date.now();
@@ -193,8 +255,23 @@ async function runCodexRealtime(chatId, task) {
     scheduleFlush();
   };
 
-  const parseStdout = createCodexOutputParser(append);
-  const parseStderr = createCodexOutputParser(append);
+  const onCodexEvent = (event) => {
+    const threadId = extractCodexThreadId(event);
+    if (!isCodexThreadId(threadId)) return;
+
+    activeThreadId = threadId;
+    saveCodexSession(projectPath, threadId);
+
+    if (!sessionLineAdded) {
+      sessionLineAdded = true;
+      append(
+        `${savedSession ? "Resumed" : "Started"} Codex session ${threadId}.`,
+      );
+    }
+  };
+
+  const parseStdout = createCodexOutputParser(append, onCodexEvent);
+  const parseStderr = createCodexOutputParser(append, onCodexEvent);
 
   child.stdout.on("data", (chunk) => parseStdout(chunk.toString("utf8")));
   child.stderr.on("data", (chunk) => parseStderr(chunk.toString("utf8")));
@@ -208,21 +285,46 @@ async function runCodexRealtime(chatId, task) {
     append(`Failed to start Codex: ${err.message}`);
   });
 
-  child.on("close", async (code, signal) => {
-    finished = true;
-    clearTimeout(timeout);
-    if (flushTimer) clearTimeout(flushTimer);
+  await new Promise((resolve) => {
+    child.on("close", async (code, signal) => {
+      try {
+        finished = true;
+        clearTimeout(timeout);
+        if (flushTimer) clearTimeout(flushTimer);
 
-    const status =
-      code === 0
-        ? "Done"
-        : `Stopped${signal ? ` by ${signal}` : ""}${code === null ? "" : ` with code ${code}`}`;
-    const finalText = `${status}: ${task}\n\n${trimForTelegram(output) || "No output."}`;
-    await safeEditMessage(chatId, liveMessage.message_id, finalText);
+        if (
+          code !== 0 &&
+          savedSession &&
+          /not found|no such|failed to load/i.test(output)
+        ) {
+          clearCodexSession();
+          append(
+            "Saved Codex session was invalid. Run /run again to start a new session.",
+          );
+        } else if (code === 0 && activeThreadId) {
+          saveCodexSession(projectPath, activeThreadId);
+        }
 
-    if (output.length > TELEGRAM_LIMIT) {
-      await sendLongMessage(chatId, output);
-    }
+        const status =
+          code === 0
+            ? "Done"
+            : `Stopped${signal ? ` by ${signal}` : ""}${
+                code === null ? "" : ` with code ${code}`
+              }`;
+        const finalText = `${status}: ${task}\n\n${
+          trimForTelegram(output) || "No output."
+        }`;
+        await safeEditMessage(chatId, liveMessage.message_id, finalText);
+
+        if (output.length > TELEGRAM_LIMIT) {
+          await sendLongMessage(chatId, output);
+        }
+      } catch (err) {
+        console.error("Failed to finalize Codex run:", err.message);
+      } finally {
+        resolve();
+      }
+    });
   });
 }
 
@@ -238,11 +340,22 @@ bot.onText(/\/tasks/, (msg) => {
 
 bot.onText(/\/run (.+)/, (msg, match) => {
   if (!auth(msg)) return;
+  if (activeCodexRun) {
+    return bot.sendMessage(
+      msg.chat.id,
+      "Codex is already running. Wait for it to finish before using /run again.",
+    );
+  }
+
   const id = match[1].trim();
   const task = findTask(id);
   if (!task) return bot.sendMessage(msg.chat.id, "Task not found");
 
-  runCodexRealtime(msg.chat.id, task).catch((err) => {
-    bot.sendMessage(msg.chat.id, `Failed to run Codex: ${err.message}`);
-  });
+  activeCodexRun = runCodexRealtime(msg.chat.id, task)
+    .catch((err) => {
+      bot.sendMessage(msg.chat.id, `Failed to run Codex: ${err.message}`);
+    })
+    .finally(() => {
+      activeCodexRun = null;
+    });
 });
