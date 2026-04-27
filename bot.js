@@ -12,9 +12,11 @@ const bot = new TelegramBot(token, { polling: true });
 const TELEGRAM_LIMIT = 3900;
 const EDIT_INTERVAL_MS = 1200;
 const RUN_TIMEOUT_MS = 1000 * 60 * 30;
+const STOP_FORCE_KILL_MS = 1000 * 8;
 const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 const CODEX_SESSION_PATH = path.resolve(process.cwd(), ".codex-session.json");
 let activeCodexRun = null;
+let activeCodexJob = null;
 
 function auth(msg) {
   return String(msg.chat.id) === allowed;
@@ -111,6 +113,44 @@ function stripAnsi(text) {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 }
 
+function isChildRunning(child) {
+  return child && child.exitCode === null && child.signalCode === null;
+}
+
+function signalCodexChild(child, signal) {
+  if (!isChildRunning(child)) return false;
+
+  try {
+    if (process.platform !== "win32" && child.pid) {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+    return true;
+  } catch (err) {
+    if (err.code !== "ESRCH") {
+      console.error(`Failed to send ${signal} to Codex:`, err.message);
+    }
+    return false;
+  }
+}
+
+function terminateCodexJob(job, signal = "SIGTERM") {
+  if (!job?.child) return false;
+
+  const signaled = signalCodexChild(job.child, signal);
+  if (signaled && signal === "SIGTERM" && !job.forceKillTimer) {
+    const child = job.child;
+    job.forceKillTimer = setTimeout(() => {
+      if (isChildRunning(child)) {
+        signalCodexChild(child, "SIGKILL");
+      }
+    }, STOP_FORCE_KILL_MS);
+  }
+
+  return signaled;
+}
+
 function extractCodexEventText(event) {
   if (!event || typeof event !== "object") return "";
 
@@ -194,7 +234,7 @@ async function sendLongMessage(chatId, text) {
   }
 }
 
-async function runCodexRealtime(chatId, task) {
+async function runCodexRealtime(chatId, task, job) {
   const projectPath = getProjectPath();
   const todoPath = getTodoPath();
   const prompt = `Read ${todoPath} and complete task ${task}`;
@@ -226,6 +266,7 @@ async function runCodexRealtime(chatId, task) {
     cwd: projectPath,
     env: process.env,
     shell: false,
+    detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -235,6 +276,7 @@ async function runCodexRealtime(chatId, task) {
   let flushTimer = null;
   let activeThreadId = savedSession?.threadId || "";
   let sessionLineAdded = false;
+  let liveStatus = "Running";
 
   const flush = async (force = false) => {
     const now = Date.now();
@@ -243,7 +285,9 @@ async function runCodexRealtime(chatId, task) {
     await safeEditMessage(
       chatId,
       liveMessage.message_id,
-      `Running ${task}\n\n${trimForTelegram(output) || "Waiting for output..."}`,
+      `${liveStatus}: ${task}\n\n${
+        trimForTelegram(output) || "Waiting for output..."
+      }`,
     );
   };
 
@@ -259,6 +303,19 @@ async function runCodexRealtime(chatId, task) {
     output += text.endsWith("\n") ? text : `${text}\n`;
     scheduleFlush();
   };
+
+  if (job) {
+    job.child = child;
+    job.appendOutput = append;
+    job.setLiveStatus = async (status) => {
+      liveStatus = status;
+      await flush(true);
+    };
+    if (job.stopRequested) {
+      append(`${job.stopReason || "Stop requested"}.`);
+      terminateCodexJob(job);
+    }
+  }
 
   const onCodexEvent = (event) => {
     const threadId = extractCodexThreadId(event);
@@ -282,8 +339,12 @@ async function runCodexRealtime(chatId, task) {
   child.stderr.on("data", (chunk) => parseStderr(chunk.toString("utf8")));
 
   const timeout = setTimeout(() => {
+    if (job) {
+      job.stopRequested = true;
+      job.stopReason = "Stopped by timeout";
+    }
     append(`Codex timed out after ${RUN_TIMEOUT_MS / 60000} minutes.`);
-    child.kill("SIGTERM");
+    terminateCodexJob(job) || signalCodexChild(child, "SIGTERM");
   }, RUN_TIMEOUT_MS);
 
   child.on("error", (err) => {
@@ -296,6 +357,7 @@ async function runCodexRealtime(chatId, task) {
         finished = true;
         clearTimeout(timeout);
         if (flushTimer) clearTimeout(flushTimer);
+        if (job?.forceKillTimer) clearTimeout(job.forceKillTimer);
 
         if (
           code !== 0 &&
@@ -313,9 +375,16 @@ async function runCodexRealtime(chatId, task) {
         const status =
           code === 0
             ? "Done"
+            : job?.stopReason || job?.stopRequested
+              ? job.stopReason || "Stopped by request"
             : `Stopped${signal ? ` by ${signal}` : ""}${
                 code === null ? "" : ` with code ${code}`
               }`;
+        if (job?.stopRequested) {
+          output += `Codex process exited${
+            signal ? ` by ${signal}` : code === null ? "" : ` with code ${code}`
+          }.\n`;
+        }
         const finalText = `${status}: ${task}\n\n${
           trimForTelegram(output) || "No output."
         }`;
@@ -335,7 +404,7 @@ async function runCodexRealtime(chatId, task) {
 
 bot.onText(/\/start/, (msg) => {
   if (!auth(msg)) return;
-  bot.sendMessage(msg.chat.id, "Ready. Use /tasks or /run 1.1");
+  bot.sendMessage(msg.chat.id, "Ready. Use /tasks, /run 1.1, or /stop");
 });
 
 bot.onText(/\/tasks/, (msg) => {
@@ -348,7 +417,7 @@ bot.onText(/\/run (.+)/, (msg, match) => {
   if (activeCodexRun) {
     return bot.sendMessage(
       msg.chat.id,
-      "Codex is already running. Wait for it to finish before using /run again.",
+      "Codex is already running. Wait for it to finish or use /stop.",
     );
   }
 
@@ -356,11 +425,56 @@ bot.onText(/\/run (.+)/, (msg, match) => {
   const task = findTask(id);
   if (!task) return bot.sendMessage(msg.chat.id, "Task not found");
 
-  activeCodexRun = runCodexRealtime(msg.chat.id, task)
+  activeCodexJob = {
+    task,
+    child: null,
+    stopRequested: false,
+    stopReason: "",
+    forceKillTimer: null,
+    appendOutput: null,
+    setLiveStatus: null,
+  };
+
+  activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob)
     .catch((err) => {
       bot.sendMessage(msg.chat.id, `Failed to run Codex: ${err.message}`);
     })
     .finally(() => {
       activeCodexRun = null;
+      activeCodexJob = null;
     });
+});
+
+bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
+  if (!auth(msg)) return;
+
+  if (!activeCodexJob) {
+    return bot.sendMessage(msg.chat.id, "No Codex task is running.");
+  }
+
+  if (activeCodexJob.stopRequested) {
+    return bot.sendMessage(msg.chat.id, "Stop was already requested.");
+  }
+
+  activeCodexJob.stopRequested = true;
+  activeCodexJob.stopReason = "Stopped by user";
+  activeCodexJob.appendOutput?.(
+    "Stop requested. Waiting for Codex process to exit.",
+  );
+  await activeCodexJob.setLiveStatus?.("Stopping");
+
+  if (!activeCodexJob.child) {
+    return bot.sendMessage(
+      msg.chat.id,
+      `Stop requested: ${activeCodexJob.task}`,
+    );
+  }
+
+  const signaled = terminateCodexJob(activeCodexJob);
+  return bot.sendMessage(
+    msg.chat.id,
+    signaled
+      ? `Stop signal sent: ${activeCodexJob.task}\nI will update the running message when Codex exits.`
+      : "Codex task is already stopping or finished.",
+  );
 });
