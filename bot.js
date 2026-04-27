@@ -113,8 +113,55 @@ function stripAnsi(text) {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 }
 
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 function isChildRunning(child) {
   return child && child.exitCode === null && child.signalCode === null;
+}
+
+function getCodexStatusText() {
+  const projectPath = getProjectPath();
+  const savedSession = readCodexSession(projectPath);
+
+  if (!activeCodexJob) {
+    return [
+      "Codex status: off",
+      "No task is running.",
+      `Project: ${projectPath}`,
+      `Session: ${savedSession?.threadId || "none"}`,
+    ].join("\n");
+  }
+
+  const child = activeCodexJob.child;
+  const running = isChildRunning(child);
+  const status = activeCodexJob.stopRequested
+    ? "stopping"
+    : running
+      ? "running"
+      : child
+        ? "finishing"
+        : "starting";
+  const elapsed = activeCodexJob.startedAt
+    ? formatDuration(Date.now() - activeCodexJob.startedAt)
+    : "unknown";
+
+  return [
+    `Codex status: ${status}`,
+    `Task: ${activeCodexJob.task}`,
+    `PID: ${child?.pid || "not started"}`,
+    `Elapsed: ${elapsed}`,
+    `Project: ${projectPath}`,
+    `Session: ${savedSession?.threadId || "none"}`,
+  ].join("\n");
 }
 
 function signalCodexChild(child, signal) {
@@ -411,13 +458,18 @@ bot.onText(/\/start/, (msg) => {
   if (!auth(msg)) return;
   bot.sendMessage(
     msg.chat.id,
-    "Ready. Use /tasks, /run 1.1, /stop, or /approve_commit",
+    "Ready. Use /tasks, /run 1.1, /status, /stop, or /approve_commit",
   );
 });
 
 bot.onText(/\/tasks/, (msg) => {
   if (!auth(msg)) return;
   bot.sendMessage(msg.chat.id, readTodo());
+});
+
+bot.onText(/^\/status(?:@\w+)?$/, (msg) => {
+  if (!auth(msg)) return;
+  bot.sendMessage(msg.chat.id, getCodexStatusText());
 });
 
 bot.onText(/\/run (.+)/, (msg, match) => {
@@ -441,6 +493,7 @@ bot.onText(/\/run (.+)/, (msg, match) => {
     forceKillTimer: null,
     appendOutput: null,
     setLiveStatus: null,
+    startedAt: Date.now(),
   };
 
   activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob)
@@ -474,6 +527,7 @@ bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
     forceKillTimer: null,
     appendOutput: null,
     setLiveStatus: null,
+    startedAt: Date.now(),
   };
 
   activeCodexRun = runCodexRealtime(
