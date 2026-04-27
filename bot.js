@@ -88,11 +88,16 @@ function findTask(id) {
   const normalizedId = id.replace(/\.$/, "");
 
   return lines.find((line) => {
+    // 1. Bullet checkbox task: "- [ ] 1 Task", "- [x] 1.2 Task", "* [X] 2.3) Task"
+    // 2. Bullet task không checkbox: "- 1 Task", "* 1.2 Task", "- 3) Task"
+    // 3. Task bắt đầu trực tiếp bằng số: "1 Task", "1.2 Task", "3) Task", "4. Task"
     const trimmed = line.trim();
-    const checklistMatch = trimmed.match(/^-\s+\[[ xX]\]\s+(\d+(?:\.\d+)*)\.?\s+/);
-    if (checklistMatch) return checklistMatch[1] === normalizedId;
+    const taskIdMatch =
+      trimmed.match(/^[-*]\s+\[\s*[xX]?\s*\]\s+(\d+(?:\.\d+)*)[.)]?\s+/) ||
+      trimmed.match(/^[-*]\s+(\d+(?:\.\d+)*)[.)]?\s+/) ||
+      trimmed.match(/^(\d+(?:\.\d+)*)[.)]?\s+/);
 
-    return trimmed.startsWith(id);
+    return taskIdMatch?.[1] === normalizedId;
   });
 }
 
