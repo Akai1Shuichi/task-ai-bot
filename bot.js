@@ -234,10 +234,15 @@ async function sendLongMessage(chatId, text) {
   }
 }
 
-async function runCodexRealtime(chatId, task, job) {
+async function runCodexRealtime(
+  chatId,
+  task,
+  job,
+  promptOverride = "",
+) {
   const projectPath = getProjectPath();
   const todoPath = getTodoPath();
-  const prompt = `Read ${todoPath} and complete task ${task}`;
+  const prompt = promptOverride || `Read ${todoPath} and complete task ${task}`;
   const savedSession = readCodexSession(projectPath);
   const liveMessage = await bot.sendMessage(
     chatId,
@@ -404,7 +409,10 @@ async function runCodexRealtime(chatId, task, job) {
 
 bot.onText(/\/start/, (msg) => {
   if (!auth(msg)) return;
-  bot.sendMessage(msg.chat.id, "Ready. Use /tasks, /run 1.1, or /stop");
+  bot.sendMessage(
+    msg.chat.id,
+    "Ready. Use /tasks, /run 1.1, /stop, or /approve_commit",
+  );
 });
 
 bot.onText(/\/tasks/, (msg) => {
@@ -438,6 +446,47 @@ bot.onText(/\/run (.+)/, (msg, match) => {
   activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob)
     .catch((err) => {
       bot.sendMessage(msg.chat.id, `Failed to run Codex: ${err.message}`);
+    })
+    .finally(() => {
+      activeCodexRun = null;
+      activeCodexJob = null;
+    });
+});
+
+bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
+  if (!auth(msg)) return;
+  if (activeCodexRun) {
+    return bot.sendMessage(
+      msg.chat.id,
+      "Codex is already running. Wait for it to finish or use /stop.",
+    );
+  }
+
+  const task = "approve commit";
+  const prompt =
+    "The user approved committing the current work. Inspect git status and git diff in this repository. If there are changes, stage the relevant files and create one clear git commit. Only use git commands for status, diff, add, and commit; do not edit files. If there is nothing to commit, report that.";
+
+  activeCodexJob = {
+    task,
+    child: null,
+    stopRequested: false,
+    stopReason: "",
+    forceKillTimer: null,
+    appendOutput: null,
+    setLiveStatus: null,
+  };
+
+  activeCodexRun = runCodexRealtime(
+    msg.chat.id,
+    task,
+    activeCodexJob,
+    prompt,
+  )
+    .catch((err) => {
+      bot.sendMessage(
+        msg.chat.id,
+        `Failed to run Codex commit approval: ${err.message}`,
+      );
     })
     .finally(() => {
       activeCodexRun = null;
