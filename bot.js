@@ -78,10 +78,12 @@ function saveCodexSession(projectPath, threadId) {
 function clearCodexSession() {
   try {
     fs.unlinkSync(CODEX_SESSION_PATH);
+    return true;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error("Failed to clear Codex session state:", err.message);
     }
+    return false;
   }
 }
 
@@ -140,32 +142,32 @@ function getCodexStatusText() {
 
   if (!activeCodexJob) {
     return [
-      "Codex status: off",
-      "No task is running.",
-      `Project: ${projectPath}`,
-      `Session: ${savedSession?.threadId || "none"}`,
+      "Trạng thái Codex: đang tắt",
+      "Không có tác vụ nào đang chạy.",
+      `Dự án: ${projectPath}`,
+      `Thread: ${savedSession?.threadId || "không có"}`,
     ].join("\n");
   }
 
   const child = activeCodexJob.child;
   const running = isChildRunning(child);
   const status = activeCodexJob.stopRequested
-    ? "stopping"
+    ? "đang dừng"
     : running
-      ? "running"
+      ? "đang chạy"
       : child
-        ? "finishing"
-        : "starting";
+        ? "đang hoàn tất"
+        : "đang khởi động";
   const elapsed = activeCodexJob.startedAt
     ? formatDuration(Date.now() - activeCodexJob.startedAt)
-    : "unknown";
+    : "không rõ";
 
   return [
-    `Codex status: ${status}`,
-    `Task: ${activeCodexJob.task}`,
-    `Elapsed: ${elapsed}`,
-    `Project: ${projectPath}`,
-    `Session: ${savedSession?.threadId || "none"}`,
+    `Trạng thái Codex: ${status}`,
+    `Tác vụ: ${activeCodexJob.task}`,
+    `Thời gian chạy: ${elapsed}`,
+    `Dự án: ${projectPath}`,
+    `Thread: ${savedSession?.threadId || "không có"}`,
   ].join("\n");
 }
 
@@ -226,12 +228,12 @@ function extractCodexEventText(event) {
         item.exit_code === undefined && item.exitCode === undefined
           ? ""
           : ` (exit ${item.exit_code ?? item.exitCode})`;
-      return `${event.type === "item.started" ? "Running" : "Finished"}: ${command}${exit}`;
+      return `${event.type === "item.started" ? "Đang chạy" : "Đã xong"}: ${command}${exit}`;
     }
   }
 
-  if (event.type === "turn.started") return "Codex started.";
-  if (event.type === "turn.completed") return "Codex finished.";
+  if (event.type === "turn.started") return "Codex đã bắt đầu.";
+  if (event.type === "turn.completed") return "Codex đã hoàn tất.";
 
   return "";
 }
@@ -271,7 +273,7 @@ function createCodexOutputParser(onText, onEvent) {
 
 async function safeEditMessage(chatId, messageId, text) {
   try {
-    await bot.editMessageText(trimForTelegram(text) || "Running...", {
+    await bot.editMessageText(trimForTelegram(text) || "Đang chạy...", {
       chat_id: chatId,
       message_id: messageId,
     });
@@ -284,7 +286,7 @@ async function safeEditMessage(chatId, messageId, text) {
 }
 
 async function sendLongMessage(chatId, text) {
-  const clean = text || "Done";
+  const clean = text || "Hoàn tất";
   for (let i = 0; i < clean.length; i += TELEGRAM_LIMIT) {
     await bot.sendMessage(chatId, clean.slice(i, i + TELEGRAM_LIMIT));
   }
@@ -297,8 +299,8 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
   const savedSession = readCodexSession(projectPath);
   const liveMessage = await bot.sendMessage(
     chatId,
-    `Running ${task}\n\n${
-      savedSession ? "Resuming Codex session..." : "Starting Codex session..."
+    `Đang chạy ${task}\n\n${
+      savedSession ? "Đang tiếp tục phiên Codex..." : "Đang bắt đầu phiên Codex..."
     }`,
   );
   const args = savedSession
@@ -332,7 +334,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
   let flushTimer = null;
   let activeThreadId = savedSession?.threadId || "";
   let sessionLineAdded = false;
-  let liveStatus = "Running";
+  let liveStatus = "Đang chạy";
 
   const flush = async (force = false) => {
     const now = Date.now();
@@ -342,7 +344,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
       chatId,
       liveMessage.message_id,
       `${liveStatus}: ${task}\n\n${
-        trimForTelegram(output) || "Waiting for output..."
+        trimForTelegram(output) || "Đang chờ kết quả..."
       }`,
     );
   };
@@ -368,7 +370,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
       await flush(true);
     };
     if (job.stopRequested) {
-      append(`${job.stopReason || "Stop requested"}.`);
+      append(`${job.stopReason || "Đã yêu cầu dừng"}.`);
       terminateCodexJob(job);
     }
   }
@@ -383,7 +385,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
     if (!sessionLineAdded) {
       sessionLineAdded = true;
       append(
-        `${savedSession ? "Resumed" : "Started"} Codex session ${threadId}.`,
+        `${savedSession ? "Đã tiếp tục" : "Đã bắt đầu"} phiên Codex ${threadId}.`,
       );
     }
   };
@@ -397,14 +399,14 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
   const timeout = setTimeout(() => {
     if (job) {
       job.stopRequested = true;
-      job.stopReason = "Stopped by timeout";
+      job.stopReason = "Đã dừng do timeout";
     }
-    append(`Codex timed out after ${RUN_TIMEOUT_MS / 60000} minutes.`);
+    append(`Codex quá thời gian sau ${RUN_TIMEOUT_MS / 60000} phút.`);
     terminateCodexJob(job) || signalCodexChild(child, "SIGTERM");
   }, RUN_TIMEOUT_MS);
 
   child.on("error", (err) => {
-    append(`Failed to start Codex: ${err.message}`);
+    append(`Không thể khởi động Codex: ${err.message}`);
   });
 
   await new Promise((resolve) => {
@@ -422,7 +424,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
         ) {
           clearCodexSession();
           append(
-            "Saved Codex session was invalid. Run /run again to start a new session.",
+            "Phiên Codex đã lưu không hợp lệ. Chạy lại /run để bắt đầu phiên mới.",
           );
         } else if (code === 0 && activeThreadId) {
           saveCodexSession(projectPath, activeThreadId);
@@ -430,19 +432,19 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
 
         const status =
           code === 0
-            ? "Done"
+            ? "Hoàn tất"
             : job?.stopReason || job?.stopRequested
-              ? job.stopReason || "Stopped by request"
-              : `Stopped${signal ? ` by ${signal}` : ""}${
-                  code === null ? "" : ` with code ${code}`
+              ? job.stopReason || "Đã dừng theo yêu cầu"
+              : `Đã dừng${signal ? ` bởi ${signal}` : ""}${
+                  code === null ? "" : ` với code ${code}`
                 }`;
         if (job?.stopRequested) {
-          output += `Codex process exited${
-            signal ? ` by ${signal}` : code === null ? "" : ` with code ${code}`
+          output += `Tiến trình Codex đã thoát${
+            signal ? ` bởi ${signal}` : code === null ? "" : ` với code ${code}`
           }.\n`;
         }
         const finalText = `${status}: ${task}\n\n${
-          trimForTelegram(output) || "No output."
+          trimForTelegram(output) || "Không có kết quả."
         }`;
         await safeEditMessage(chatId, liveMessage.message_id, finalText);
 
@@ -462,7 +464,7 @@ bot.onText(/\/start/, (msg) => {
   if (!auth(msg)) return;
   bot.sendMessage(
     msg.chat.id,
-    "Ready. Use /tasks, /run 1.1, /status, /stop, or /approve_commit",
+    "Sẵn sàng. Dùng /tasks, /run 1.1, /status, /stop, hoặc /approve_commit",
   );
 });
 
@@ -481,13 +483,13 @@ bot.onText(/\/run (.+)/, (msg, match) => {
   if (activeCodexRun) {
     return bot.sendMessage(
       msg.chat.id,
-      "Codex is already running. Wait for it to finish or use /stop.",
+      "Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
     );
   }
 
   const id = match[1].trim();
   const task = findTask(id);
-  if (!task) return bot.sendMessage(msg.chat.id, "Task not found");
+  if (!task) return bot.sendMessage(msg.chat.id, "Không tìm thấy tác vụ.");
 
   activeCodexJob = {
     task,
@@ -502,7 +504,7 @@ bot.onText(/\/run (.+)/, (msg, match) => {
 
   activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob)
     .catch((err) => {
-      bot.sendMessage(msg.chat.id, `Failed to run Codex: ${err.message}`);
+      bot.sendMessage(msg.chat.id, `Không thể chạy Codex: ${err.message}`);
     })
     .finally(() => {
       activeCodexRun = null;
@@ -515,11 +517,11 @@ bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
   if (activeCodexRun) {
     return bot.sendMessage(
       msg.chat.id,
-      "Codex is already running. Wait for it to finish or use /stop.",
+      "Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
     );
   }
 
-  const task = "approve commit";
+  const task = "duyệt commit";
   const prompt =
     "The user approved committing the current work. Inspect git status and git diff in this repository. If there are changes, stage the relevant files and create one clear git commit. Only use git commands for status, diff, add, and commit; do not edit files. If there is nothing to commit, report that.";
 
@@ -538,7 +540,7 @@ bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
     .catch((err) => {
       bot.sendMessage(
         msg.chat.id,
-        `Failed to run Codex commit approval: ${err.message}`,
+        `Không thể chạy Codex để duyệt commit: ${err.message}`,
       );
     })
     .finally(() => {
@@ -551,24 +553,32 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
   if (!auth(msg)) return;
 
   if (!activeCodexJob) {
-    return bot.sendMessage(msg.chat.id, "No Codex task is running.");
+    const projectPath = getProjectPath();
+    const savedSession = readCodexSession(projectPath);
+    const cleared = clearCodexSession();
+    return bot.sendMessage(
+      msg.chat.id,
+      savedSession || cleared
+        ? "Không có tác vụ Codex nào đang chạy. Đã xóa threadId Codex đã lưu."
+        : "Không có tác vụ Codex nào đang chạy. Không có threadId Codex đã lưu để xóa.",
+    );
   }
 
   if (activeCodexJob.stopRequested) {
-    return bot.sendMessage(msg.chat.id, "Stop was already requested.");
+    return bot.sendMessage(msg.chat.id, "Đã yêu cầu dừng trước đó.");
   }
 
   activeCodexJob.stopRequested = true;
-  activeCodexJob.stopReason = "Stopped by user";
+  activeCodexJob.stopReason = "Đã dừng bởi người dùng";
   activeCodexJob.appendOutput?.(
-    "Stop requested. Waiting for Codex process to exit.",
+    "Đã yêu cầu dừng. Đang chờ tiến trình Codex thoát.",
   );
-  await activeCodexJob.setLiveStatus?.("Stopping");
+  await activeCodexJob.setLiveStatus?.("Đang dừng");
 
   if (!activeCodexJob.child) {
     return bot.sendMessage(
       msg.chat.id,
-      `Stop requested: ${activeCodexJob.task}`,
+      `Đã yêu cầu dừng: ${activeCodexJob.task}`,
     );
   }
 
@@ -576,7 +586,7 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
   return bot.sendMessage(
     msg.chat.id,
     signaled
-      ? `Stop signal sent: ${activeCodexJob.task}\nI will update the running message when Codex exits.`
-      : "Codex task is already stopping or finished.",
+      ? `Đã gửi tín hiệu dừng: ${activeCodexJob.task}\nBot sẽ cập nhật tin nhắn đang chạy khi Codex thoát.`
+      : "Tác vụ Codex đang dừng hoặc đã kết thúc.",
   );
 });
