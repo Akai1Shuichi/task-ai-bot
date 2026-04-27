@@ -1,6 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import fs from "fs";
+import path from "path";
 import { spawn } from "child_process";
 
 dotenv.config();
@@ -11,18 +12,45 @@ const bot = new TelegramBot(token, { polling: true });
 const TELEGRAM_LIMIT = 3900;
 const EDIT_INTERVAL_MS = 1200;
 const RUN_TIMEOUT_MS = 1000 * 60 * 30;
+const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 
 function auth(msg) {
   return String(msg.chat.id) === allowed;
 }
 
+function loadConfig() {
+  return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+}
+
+function getProjectPath() {
+  const config = loadConfig();
+  return path.resolve(config.path);
+}
+
+function getTodoPath() {
+  const config = loadConfig();
+  const projectPath = getProjectPath();
+  const todoFile = config.todoFile || "todo.md";
+  return path.isAbsolute(todoFile)
+    ? todoFile
+    : path.resolve(projectPath, todoFile);
+}
+
 function readTodo() {
-  return fs.readFileSync("./todo.md", "utf8");
+  return fs.readFileSync(getTodoPath(), "utf8");
 }
 
 function findTask(id) {
   const lines = readTodo().split("\n");
-  return lines.find((x) => x.trim().startsWith(id));
+  const normalizedId = id.replace(/\.$/, "");
+
+  return lines.find((line) => {
+    const trimmed = line.trim();
+    const checklistMatch = trimmed.match(/^-\s+\[[ xX]\]\s+(\d+(?:\.\d+)*)\.?\s+/);
+    if (checklistMatch) return checklistMatch[1] === normalizedId;
+
+    return trimmed.startsWith(id);
+  });
 }
 
 function trimForTelegram(text, limit = TELEGRAM_LIMIT) {
@@ -113,11 +141,24 @@ async function sendLongMessage(chatId, text) {
 }
 
 async function runCodexRealtime(chatId, task) {
-  const prompt = `Read todo.md and complete task ${task}`;
-  const liveMessage = await bot.sendMessage(chatId, `Running ${task}\n\nStarting Codex...`);
-  const args = ["exec", "--skip-git-repo-check", "--ephemeral", "--json", prompt];
+  const projectPath = getProjectPath();
+  const todoPath = getTodoPath();
+  const prompt = `Read ${todoPath} and complete task ${task}`;
+  const liveMessage = await bot.sendMessage(
+    chatId,
+    `Running ${task}\n\nStarting Codex...`,
+  );
+  const args = [
+    "exec",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "workspace-write",
+    "--ephemeral",
+    "--json",
+    prompt,
+  ];
   const child = spawn("codex", args, {
-    cwd: process.cwd(),
+    cwd: projectPath,
     env: process.env,
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
