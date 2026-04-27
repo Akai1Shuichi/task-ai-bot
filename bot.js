@@ -113,6 +113,12 @@ function stripAnsi(text) {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 }
 
+function isIgnorableCodexOutput(text) {
+  return /codex_core::session: failed to record rollout items: thread/i.test(
+    text,
+  );
+}
+
 function formatDuration(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -157,7 +163,6 @@ function getCodexStatusText() {
   return [
     `Codex status: ${status}`,
     `Task: ${activeCodexJob.task}`,
-    `PID: ${child?.pid || "not started"}`,
     `Elapsed: ${elapsed}`,
     `Project: ${projectPath}`,
     `Session: ${savedSession?.threadId || "none"}`,
@@ -247,12 +252,16 @@ function createCodexOutputParser(onText, onEvent) {
     for (const line of lines) {
       const cleanLine = stripAnsi(line).trim();
       if (!cleanLine) continue;
+      if (isIgnorableCodexOutput(cleanLine)) continue;
 
       try {
         const event = JSON.parse(cleanLine);
         if (onEvent) onEvent(event);
         const text = extractCodexEventText(event);
-        if (text) onText(stripAnsi(String(text)));
+        if (text) {
+          const cleanText = stripAnsi(String(text));
+          if (!isIgnorableCodexOutput(cleanText)) onText(cleanText);
+        }
       } catch {
         onText(cleanLine);
       }
@@ -281,12 +290,7 @@ async function sendLongMessage(chatId, text) {
   }
 }
 
-async function runCodexRealtime(
-  chatId,
-  task,
-  job,
-  promptOverride = "",
-) {
+async function runCodexRealtime(chatId, task, job, promptOverride = "") {
   const projectPath = getProjectPath();
   const todoPath = getTodoPath();
   const prompt = promptOverride || `Read ${todoPath} and complete task ${task}`;
@@ -429,9 +433,9 @@ async function runCodexRealtime(
             ? "Done"
             : job?.stopReason || job?.stopRequested
               ? job.stopReason || "Stopped by request"
-            : `Stopped${signal ? ` by ${signal}` : ""}${
-                code === null ? "" : ` with code ${code}`
-              }`;
+              : `Stopped${signal ? ` by ${signal}` : ""}${
+                  code === null ? "" : ` with code ${code}`
+                }`;
         if (job?.stopRequested) {
           output += `Codex process exited${
             signal ? ` by ${signal}` : code === null ? "" : ` with code ${code}`
@@ -530,12 +534,7 @@ bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
     startedAt: Date.now(),
   };
 
-  activeCodexRun = runCodexRealtime(
-    msg.chat.id,
-    task,
-    activeCodexJob,
-    prompt,
-  )
+  activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob, prompt)
     .catch((err) => {
       bot.sendMessage(
         msg.chat.id,
