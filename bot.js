@@ -925,7 +925,10 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
           saveCodexSession(projectPath, activeThreadId);
         }
 
-        if (code === 0 && task !== "duyệt commit") {
+        const completedSuccessfully =
+          code === 0 && !job?.stopRequested && task !== "duyệt commit";
+
+        if (completedSuccessfully) {
           lastCompletedTask = task;
         }
 
@@ -951,7 +954,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
           await sendLongMessage(chatId, output);
         }
 
-        if (code === 0 && task !== "duyệt commit") {
+        if (completedSuccessfully) {
           await sendApproveCommitPrompt(chatId);
         }
       } catch (err) {
