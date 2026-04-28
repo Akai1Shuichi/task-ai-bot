@@ -361,6 +361,31 @@ function getCodexStatusText() {
   ].join("\n");
 }
 
+function getWelcomeText() {
+  const tasks = parseTodoTasks();
+  const openCount = tasks.filter((task) => !task.done).length;
+  const savedSession = readCodexSession(getProjectPath());
+
+  return [
+    "Bot Codex Todo đã sẵn sàng.",
+    "",
+    "Bot này sẽ đọc `todo.md` của project và chạy Codex theo từng task.",
+    "",
+    "Bắt đầu nhanh:",
+    "1. Dùng /tasks để xem danh sách task",
+    "2. Dùng /run <id> hoặc bấm nút Run để chạy task",
+    "3. Dùng /status để xem tiến trình hoặc /stop để dừng",
+    "",
+    `Project: ${getProjectPath()}`,
+    `Todo file: ${getTodoPath()}`,
+    `Task đang mở: ${openCount}/${tasks.length}`,
+    `Thread đã lưu: ${savedSession?.threadId || "không có"}`,
+    "",
+    "Nút nhanh bên dưới: Tasks, Status, Help, Stop",
+    "Nếu cần xem chi tiết hơn, dùng /help",
+  ].join("\n");
+}
+
 function getHelpText() {
   return [
     "Bot này chạy Codex cho project được cấu hình trong config.",
@@ -753,10 +778,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
 
 bot.onText(/\/start/, (msg) => {
   if (!auth(msg)) return;
-  sendBotMessage(
-    msg.chat.id,
-    "Sẵn sàng. Dùng /tasks, /run 1.1, /status, /stop, hoặc /approve_commit",
-  );
+  sendBotMessage(msg.chat.id, getWelcomeText());
 });
 
 bot.onText(/^\/help(?:@\w+)?$/, (msg) => {
