@@ -40,6 +40,7 @@ const REPLY_KEYBOARD = {
 };
 let activeCodexRun = null;
 let activeCodexJob = null;
+let lastCompletedTask = "";
 
 async function setupTelegramCommands() {
   try {
@@ -157,6 +158,148 @@ function getTodoPath() {
 
 function readTodo() {
   return fs.readFileSync(getTodoPath(), "utf8");
+}
+
+function ensureProjectGitRepo(projectPath) {
+  const check = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
+    cwd: projectPath,
+    encoding: "utf8",
+    shell: false,
+  });
+
+  if (check.status === 0 && check.stdout.trim() === "true") {
+    return { ok: true, initialized: false };
+  }
+
+  const init = spawnSync("git", ["init"], {
+    cwd: projectPath,
+    encoding: "utf8",
+    shell: false,
+  });
+
+  if (init.status !== 0) {
+    const detail =
+      init.stderr?.trim() || init.stdout?.trim() || "git init thất bại.";
+    return {
+      ok: false,
+      initialized: false,
+      error: detail,
+    };
+  }
+
+  return { ok: true, initialized: true };
+}
+
+function formatTaskForCommitMessage(task) {
+  if (!task) return "";
+
+  const trimmed = task.trim();
+  const match =
+    trimmed.match(/^[-*]\s+\[\s*[xX]?\s*\]\s+((?:\d+(?:\.\d+)*)[.)]?\s+.+)$/) ||
+    trimmed.match(/^[-*]\s+((?:\d+(?:\.\d+)*)[.)]?\s+.+)$/) ||
+    trimmed.match(/^((?:\d+(?:\.\d+)*)[.)]?\s+.+)$/);
+
+  return (match?.[1] || trimmed).trim();
+}
+
+function runGitCommand(projectPath, args) {
+  return spawnSync("git", args, {
+    cwd: projectPath,
+    encoding: "utf8",
+    shell: false,
+  });
+}
+
+function approveCommitForLastTask() {
+  const projectPath = getProjectPath();
+  const gitState = ensureProjectGitRepo(projectPath);
+
+  if (!gitState.ok) {
+    return {
+      ok: false,
+      message: `❌ Không thể chuẩn bị git repo cho /approve_commit: ${gitState.error}`,
+    };
+  }
+
+  if (!lastCompletedTask) {
+    return {
+      ok: false,
+      message:
+        "⚠️ Chưa có task hoàn tất gần nhất để dùng làm commit message. Hãy chạy /run trước.",
+    };
+  }
+
+  const status = runGitCommand(projectPath, ["status", "--porcelain"]);
+  if (status.status !== 0) {
+    const detail =
+      status.stderr?.trim() || status.stdout?.trim() || "git status thất bại.";
+    return {
+      ok: false,
+      message: `❌ Không thể đọc git status: ${detail}`,
+    };
+  }
+
+  if (!status.stdout.trim()) {
+    return {
+      ok: true,
+      message: "🫥 Không có thay đổi nào để commit.",
+    };
+  }
+
+  const add = runGitCommand(projectPath, ["add", "-A"]);
+  if (add.status !== 0) {
+    const detail =
+      add.stderr?.trim() || add.stdout?.trim() || "git add thất bại.";
+    return {
+      ok: false,
+      message: `❌ Không thể stage thay đổi: ${detail}`,
+    };
+  }
+
+  const cachedDiff = runGitCommand(projectPath, ["diff", "--cached", "--quiet"]);
+  if (cachedDiff.status === 0) {
+    return {
+      ok: true,
+      message: "🫥 Không có thay đổi staged để commit.",
+    };
+  }
+
+  if (cachedDiff.status !== 1) {
+    const detail =
+      cachedDiff.stderr?.trim() ||
+      cachedDiff.stdout?.trim() ||
+      "git diff --cached thất bại.";
+    return {
+      ok: false,
+      message: `❌ Không thể kiểm tra staged diff: ${detail}`,
+    };
+  }
+
+  const commitMessage = formatTaskForCommitMessage(lastCompletedTask);
+  const commit = runGitCommand(projectPath, ["commit", "-m", commitMessage]);
+  if (commit.status !== 0) {
+    const detail =
+      commit.stderr?.trim() || commit.stdout?.trim() || "git commit thất bại.";
+    return {
+      ok: false,
+      message: `❌ Không thể tạo commit: ${detail}`,
+    };
+  }
+
+  const response = [];
+  if (gitState.initialized) {
+    response.push(`🆕 Project chưa có git repo. Đã chạy \`git init\` tại:\n${projectPath}`);
+  }
+  response.push(`✅ Đã tạo commit với message: ${commitMessage}`);
+  if (commit.stdout.trim()) {
+    response.push("");
+    response.push(commit.stdout.trim());
+  }
+
+  return {
+    ok: true,
+    message: response.join("\n"),
+  };
 }
 
 function parseTodoTasks() {
@@ -752,6 +895,10 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
           saveCodexSession(projectPath, activeThreadId);
         }
 
+        if (code === 0 && task !== "duyệt commit") {
+          lastCompletedTask = task;
+        }
+
         const status =
           code === 0
             ? "Hoàn tất"
@@ -813,10 +960,15 @@ bot.onText(/\/run (.+)/, (msg, match) => {
 
 bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
   if (!auth(msg)) return;
-  const task = "duyệt commit";
-  const prompt =
-    "The user approved committing the current work. Inspect git status and git diff in this repository. If there are changes, stage the relevant files and create one clear git commit. Only use git commands for status, diff, add, and commit; do not edit files. If there is nothing to commit, report that.";
-  startCodexJob(msg.chat.id, task, prompt);
+  if (activeCodexRun) {
+    return sendBotMessage(
+      msg.chat.id,
+      "⏳ Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
+    );
+  }
+
+  const result = approveCommitForLastTask();
+  return sendBotMessage(msg.chat.id, result.message);
 });
 
 bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
