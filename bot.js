@@ -302,6 +302,36 @@ function approveCommitForLastTask() {
   };
 }
 
+function getApproveCommitPromptOptions() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "✅ Commit luôn",
+            callback_data: "approve_commit",
+          },
+        ],
+      ],
+    },
+  };
+}
+
+async function sendApproveCommitPrompt(chatId) {
+  if (!lastCompletedTask) return;
+
+  await bot.sendMessage(
+    chatId,
+    [
+      "✅ Codex đã hoàn tất task.",
+      `🧩 Task gần nhất: ${formatTaskForCommitMessage(lastCompletedTask)}`,
+      "",
+      "Bạn có muốn commit luôn không?",
+    ].join("\n"),
+    getApproveCommitPromptOptions(),
+  );
+}
+
 function parseTodoTasks() {
   const lines = readTodo().split("\n");
   const tasks = [];
@@ -920,6 +950,10 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
         if (output.length > TELEGRAM_LIMIT) {
           await sendLongMessage(chatId, output);
         }
+
+        if (code === 0 && task !== "duyệt commit") {
+          await sendApproveCommitPrompt(chatId);
+        }
       } catch (err) {
         console.error("Failed to finalize Codex run:", err.message);
       } finally {
@@ -1008,6 +1042,27 @@ bot.on("callback_query", async (query) => {
         text: "Không được phép dùng bot này.",
       });
     }
+    return;
+  }
+
+  if (data === "approve_commit") {
+    if (activeCodexRun) {
+      if (query.id) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "⏳ Codex vẫn đang chạy. Chưa thể commit.",
+        });
+      }
+      return;
+    }
+
+    if (query.id) {
+      await bot.answerCallbackQuery(query.id, {
+        text: "✅ Đang tạo commit",
+      });
+    }
+
+    const result = approveCommitForLastTask();
+    await sendBotMessage(chatId, result.message);
     return;
   }
 
