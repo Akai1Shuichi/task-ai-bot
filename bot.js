@@ -17,6 +17,7 @@ const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 const CODEX_SESSION_PATH = path.resolve(process.cwd(), ".codex-session.json");
 const TELEGRAM_COMMANDS = [
   { command: "start", description: "Khởi động bot và xem hướng dẫn nhanh" },
+  { command: "help", description: "Xem hướng dẫn dùng bot" },
   { command: "tasks", description: "Xem danh sách task hiện tại" },
   { command: "status", description: "Xem trạng thái phiên Codex" },
   { command: "run", description: "Chạy task theo id, ví dụ /run 1" },
@@ -184,6 +185,31 @@ function getCodexStatusText() {
     `Thời gian chạy: ${elapsed}`,
     `Dự án: ${projectPath}`,
     `Thread: ${savedSession?.threadId || "không có"}`,
+  ].join("\n");
+}
+
+function getHelpText() {
+  return [
+    "Bot này chạy Codex cho project được cấu hình trong config.",
+    "",
+    "Các lệnh hỗ trợ:",
+    "/start - kiểm tra bot đang sẵn sàng",
+    "/help - xem hướng dẫn và mô tả lệnh",
+    "/tasks - xem danh sách task trong todo.md",
+    "/run <id> - chạy task theo id, ví dụ /run 1 hoặc /run 1.2",
+    "/status - xem Codex có đang chạy hay không",
+    "/stop - dừng task Codex đang chạy hoặc xóa thread đã lưu",
+    "/approve_commit - yêu cầu Codex kiểm tra diff và tạo commit nếu phù hợp",
+    "",
+    "Flow dùng nhanh:",
+    "1. Dùng /tasks để xem task",
+    "2. Dùng /run <id> để chạy task",
+    "3. Dùng /status để kiểm tra tiến trình",
+    "4. Dùng /stop nếu cần dừng",
+    "",
+    "Config hiện tại:",
+    `- Project path: ${getProjectPath()}`,
+    `- Todo file: ${getTodoPath()}`,
   ].join("\n");
 }
 
@@ -484,6 +510,11 @@ bot.onText(/\/start/, (msg) => {
     msg.chat.id,
     "Sẵn sàng. Dùng /tasks, /run 1.1, /status, /stop, hoặc /approve_commit",
   );
+});
+
+bot.onText(/^\/help(?:@\w+)?$/, (msg) => {
+  if (!auth(msg)) return;
+  bot.sendMessage(msg.chat.id, getHelpText());
 });
 
 bot.onText(/\/tasks/, (msg) => {
