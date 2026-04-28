@@ -24,10 +24,16 @@ const TELEGRAM_COMMANDS = [
   { command: "stop", description: "Dừng task Codex đang chạy" },
   { command: "approve_commit", description: "Yêu cầu Codex tạo commit" },
 ];
+const KEYBOARD_LABELS = {
+  tasks: "🧾 Tasks",
+  status: "📊 Status",
+  help: "🆘 Help",
+  stop: "🛑 Stop",
+};
 const REPLY_KEYBOARD = {
   keyboard: [
-    [{ text: "Tasks" }, { text: "Status" }],
-    [{ text: "Help" }, { text: "Stop" }],
+    [{ text: KEYBOARD_LABELS.tasks }, { text: KEYBOARD_LABELS.status }],
+    [{ text: KEYBOARD_LABELS.help }, { text: KEYBOARD_LABELS.stop }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -252,22 +258,22 @@ function getTaskSummaryText(tasks) {
   const openCount = tasks.length - doneCount;
 
   if (!tasks.length) {
-    return "Không tìm thấy task nào trong todo.md.";
+    return "🧾 Không tìm thấy task nào trong todo.md.";
   }
 
   const lines = [
-    `Danh sách task: ${tasks.length}`,
-    `Đang mở: ${openCount} | Hoàn tất: ${doneCount}`,
+    `🧾 Danh sách task: ${tasks.length}`,
+    `📌 Đang mở: ${openCount} | ✅ Hoàn tất: ${doneCount}`,
     "",
   ];
 
   for (const task of tasks) {
-    const status = task.done ? "[x]" : "[ ]";
+    const status = task.done ? "✅" : "🟡";
     lines.push(`${status} ${task.id}. ${task.text}`);
   }
 
   lines.push("");
-  lines.push("Có thể bấm nút Run bên dưới để chạy task chưa hoàn tất.");
+  lines.push("▶️ Có thể bấm nút Run bên dưới để chạy task chưa hoàn tất.");
   return lines.join("\n");
 }
 
@@ -278,7 +284,7 @@ function buildTasksInlineKeyboard(tasks) {
   return {
     inline_keyboard: openTasks.map((task) => [
       {
-        text: `Run ${task.id}`,
+        text: `▶️ Run ${task.id}`,
         callback_data: `run:${task.id}`,
       },
     ]),
@@ -332,10 +338,10 @@ function getCodexStatusText() {
 
   if (!activeCodexJob) {
     return [
-      "Trạng thái Codex: đang tắt",
-      "Không có tác vụ nào đang chạy.",
-      `Dự án: ${projectPath}`,
-      `Thread: ${savedSession?.threadId || "không có"}`,
+      "📊 Trạng thái Codex: đang tắt",
+      "🫥 Không có tác vụ nào đang chạy.",
+      `📁 Dự án: ${projectPath}`,
+      `🧵 Thread: ${savedSession?.threadId || "không có"}`,
     ].join("\n");
   }
 
@@ -353,11 +359,11 @@ function getCodexStatusText() {
     : "không rõ";
 
   return [
-    `Trạng thái Codex: ${status}`,
-    `Tác vụ: ${activeCodexJob.task}`,
-    `Thời gian chạy: ${elapsed}`,
-    `Dự án: ${projectPath}`,
-    `Thread: ${savedSession?.threadId || "không có"}`,
+    `📊 Trạng thái Codex: ${status}`,
+    `🧩 Tác vụ: ${activeCodexJob.task}`,
+    `⏱️ Thời gian chạy: ${elapsed}`,
+    `📁 Dự án: ${projectPath}`,
+    `🧵 Thread: ${savedSession?.threadId || "không có"}`,
   ].join("\n");
 }
 
@@ -367,30 +373,30 @@ function getWelcomeText() {
   const savedSession = readCodexSession(getProjectPath());
 
   return [
-    "Bot Codex Todo đã sẵn sàng.",
+    "🤖 Bot Codex Todo đã sẵn sàng.",
     "",
     "Bot này sẽ đọc `todo.md` của project và chạy Codex theo từng task.",
     "",
-    "Bắt đầu nhanh:",
+    "🚀 Bắt đầu nhanh:",
     "1. Dùng /tasks để xem danh sách task",
     "2. Dùng /run <id> hoặc bấm nút Run để chạy task",
     "3. Dùng /status để xem tiến trình hoặc /stop để dừng",
     "",
-    `Project: ${getProjectPath()}`,
-    `Todo file: ${getTodoPath()}`,
-    `Task đang mở: ${openCount}/${tasks.length}`,
-    `Thread đã lưu: ${savedSession?.threadId || "không có"}`,
+    `📁 Project: ${getProjectPath()}`,
+    `📝 Todo file: ${getTodoPath()}`,
+    `📌 Task đang mở: ${openCount}/${tasks.length}`,
+    `🧵 Thread đã lưu: ${savedSession?.threadId || "không có"}`,
     "",
-    "Nút nhanh bên dưới: Tasks, Status, Help, Stop",
-    "Nếu cần xem chi tiết hơn, dùng /help",
+    `⌨️ Nút nhanh bên dưới: ${KEYBOARD_LABELS.tasks}, ${KEYBOARD_LABELS.status}, ${KEYBOARD_LABELS.help}, ${KEYBOARD_LABELS.stop}`,
+    "ℹ️ Nếu cần xem chi tiết hơn, dùng /help",
   ].join("\n");
 }
 
 function getHelpText() {
   return [
-    "Bot này chạy Codex cho project được cấu hình trong config.",
+    "🤖 Bot này chạy Codex cho project được cấu hình trong config.",
     "",
-    "Các lệnh hỗ trợ:",
+    "🧭 Các lệnh hỗ trợ:",
     "/start - kiểm tra bot đang sẵn sàng",
     "/help - xem hướng dẫn và mô tả lệnh",
     "/tasks - xem danh sách task trong todo.md",
@@ -399,19 +405,19 @@ function getHelpText() {
     "/stop - dừng task Codex đang chạy hoặc xóa thread đã lưu",
     "/approve_commit - yêu cầu Codex kiểm tra diff và tạo commit nếu phù hợp",
     "",
-    "Flow dùng nhanh:",
+    "🚀 Flow dùng nhanh:",
     "1. Dùng /tasks để xem task",
     "2. Dùng /run <id> để chạy task",
     "3. Dùng /status để kiểm tra tiến trình",
     "4. Dùng /stop nếu cần dừng",
     "",
-    "Nút nhanh:",
-    "- Tasks",
-    "- Status",
-    "- Help",
-    "- Stop",
+    "⌨️ Nút nhanh:",
+    `- ${KEYBOARD_LABELS.tasks}`,
+    `- ${KEYBOARD_LABELS.status}`,
+    `- ${KEYBOARD_LABELS.help}`,
+    `- ${KEYBOARD_LABELS.stop}`,
     "",
-    "Config hiện tại:",
+    "📁 Config hiện tại:",
     `- Project path: ${getProjectPath()}`,
     `- Todo file: ${getTodoPath()}`,
   ].join("\n");
@@ -542,7 +548,7 @@ function startCodexJob(chatId, task, prompt = "") {
   if (activeCodexRun) {
     return sendBotMessage(
       chatId,
-      "Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
+      "⏳ Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
     );
   }
 
@@ -577,13 +583,13 @@ async function stopActiveCodexJob(chatId) {
     return sendBotMessage(
       chatId,
       savedSession || cleared
-        ? "Không có tác vụ Codex nào đang chạy. Đã xóa threadId Codex đã lưu."
-        : "Không có tác vụ Codex nào đang chạy. Không có threadId Codex đã lưu để xóa.",
+        ? "🧹 Không có tác vụ Codex nào đang chạy. Đã xóa threadId Codex đã lưu."
+        : "🫥 Không có tác vụ Codex nào đang chạy. Không có threadId Codex đã lưu để xóa.",
     );
   }
 
   if (activeCodexJob.stopRequested) {
-    return sendBotMessage(chatId, "Đã yêu cầu dừng trước đó.");
+    return sendBotMessage(chatId, "🛑 Đã yêu cầu dừng trước đó.");
   }
 
   activeCodexJob.stopRequested = true;
@@ -594,15 +600,15 @@ async function stopActiveCodexJob(chatId) {
   await activeCodexJob.setLiveStatus?.("Đang dừng");
 
   if (!activeCodexJob.child) {
-    return sendBotMessage(chatId, `Đã yêu cầu dừng: ${activeCodexJob.task}`);
+    return sendBotMessage(chatId, `🛑 Đã yêu cầu dừng: ${activeCodexJob.task}`);
   }
 
   const signaled = terminateCodexJob(activeCodexJob);
   return sendBotMessage(
     chatId,
     signaled
-      ? `Đã gửi tín hiệu dừng: ${activeCodexJob.task}\nBot sẽ cập nhật tin nhắn đang chạy khi Codex thoát.`
-      : "Tác vụ Codex đang dừng hoặc đã kết thúc.",
+      ? `🛑 Đã gửi tín hiệu dừng: ${activeCodexJob.task}\nBot sẽ cập nhật tin nhắn đang chạy khi Codex thoát.`
+      : "🫥 Tác vụ Codex đang dừng hoặc đã kết thúc.",
   );
 }
 
@@ -818,23 +824,23 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
   return stopActiveCodexJob(msg.chat.id);
 });
 
-bot.onText(/^Tasks$/i, (msg) => {
+bot.onText(/^(?:🧾\s+)?Tasks$/i, (msg) => {
   if (!auth(msg)) return;
   const payload = getTasksMessagePayload();
   sendBotMessage(msg.chat.id, payload.text, payload.options);
 });
 
-bot.onText(/^Status$/i, (msg) => {
+bot.onText(/^(?:📊\s+)?Status$/i, (msg) => {
   if (!auth(msg)) return;
   sendBotMessage(msg.chat.id, getCodexStatusText());
 });
 
-bot.onText(/^Help$/i, (msg) => {
+bot.onText(/^(?:🆘\s+)?Help$/i, (msg) => {
   if (!auth(msg)) return;
   sendBotMessage(msg.chat.id, getHelpText());
 });
 
-bot.onText(/^Stop$/i, async (msg) => {
+bot.onText(/^(?:🛑\s+)?Stop$/i, async (msg) => {
   if (!auth(msg)) return;
   return stopActiveCodexJob(msg.chat.id);
 });
@@ -876,7 +882,7 @@ bot.on("callback_query", async (query) => {
   if (activeCodexRun) {
     if (query.id) {
       await bot.answerCallbackQuery(query.id, {
-        text: "Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
+        text: "⏳ Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
       });
     }
     return;
@@ -884,7 +890,7 @@ bot.on("callback_query", async (query) => {
 
   if (query.id) {
     await bot.answerCallbackQuery(query.id, {
-      text: `Đang chạy task ${id}`,
+      text: `▶️ Đang chạy task ${id}`,
     });
   }
 
