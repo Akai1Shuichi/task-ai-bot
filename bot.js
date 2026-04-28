@@ -20,7 +20,8 @@ const WEB_ROOT = path.resolve(process.cwd(), "web");
 const DIFF_VIEWER_HOST = process.env.DIFF_VIEWER_HOST || "127.0.0.1";
 const DIFF_VIEWER_PORT = Number(process.env.DIFF_VIEWER_PORT || 3210);
 const DIFF_VIEWER_TUNNEL = process.env.DIFF_VIEWER_TUNNEL || "none";
-const NGROK_API_URL = process.env.NGROK_API_URL || "http://127.0.0.1:4040/api/tunnels";
+const NGROK_API_URL =
+  process.env.NGROK_API_URL || "http://127.0.0.1:4040/api/tunnels";
 const TELEGRAM_COMMANDS = [
   { command: "start", description: "Khởi động bot và xem hướng dẫn nhanh" },
   { command: "help", description: "Xem hướng dẫn dùng bot" },
@@ -28,6 +29,10 @@ const TELEGRAM_COMMANDS = [
   { command: "tasks", description: "Xem danh sách task hiện tại" },
   { command: "status", description: "Xem trạng thái phiên Codex" },
   { command: "run", description: "Chạy task theo id, ví dụ /run 1" },
+  {
+    command: "reply",
+    description: "Gửi prompt follow-up cho Codex trong thread hiện tại",
+  },
   { command: "stop", description: "Dừng task Codex đang chạy" },
   { command: "approve_commit", description: "Yêu cầu Codex tạo commit" },
 ];
@@ -245,12 +250,16 @@ async function fetchNgrokPublicUrl() {
 }
 
 function startCloudflaredTunnel() {
-  return spawn("cloudflared", ["tunnel", "--url", getDiffViewerUrl(), "--no-autoupdate"], {
-    cwd: process.cwd(),
-    env: process.env,
-    shell: false,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  return spawn(
+    "cloudflared",
+    ["tunnel", "--url", getDiffViewerUrl(), "--no-autoupdate"],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 }
 
 function startNgrokTunnel() {
@@ -493,7 +502,11 @@ function approveCommitForLastTask() {
     };
   }
 
-  const cachedDiff = runGitCommand(projectPath, ["diff", "--cached", "--quiet"]);
+  const cachedDiff = runGitCommand(projectPath, [
+    "diff",
+    "--cached",
+    "--quiet",
+  ]);
   if (cachedDiff.status === 0) {
     return {
       ok: true,
@@ -525,7 +538,9 @@ function approveCommitForLastTask() {
 
   const response = [];
   if (gitState.initialized) {
-    response.push(`🆕 Project chưa có git repo. Đã chạy \`git init\` tại:\n${projectPath}`);
+    response.push(
+      `🆕 Project chưa có git repo. Đã chạy \`git init\` tại:\n${projectPath}`,
+    );
   }
   response.push(`✅ Đã tạo commit với message: ${commitMessage}`);
   if (commit.stdout.trim()) {
@@ -542,18 +557,27 @@ function approveCommitForLastTask() {
 function normalizeStatusPath(rawPath) {
   const clean = rawPath.trim().replace(/^"+|"+$/g, "");
   if (clean.includes(" -> ")) {
-    return clean.split(" -> ").at(-1)?.replace(/^"+|"+$/g, "") || clean;
+    return (
+      clean
+        .split(" -> ")
+        .at(-1)
+        ?.replace(/^"+|"+$/g, "") || clean
+    );
   }
   return clean;
 }
 
 function getUntrackedDiff(projectPath, filePath) {
   const absolutePath = path.resolve(projectPath, filePath);
-  const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "--", "/dev/null", absolutePath], {
-    cwd: projectPath,
-    encoding: "utf8",
-    shell: false,
-  });
+  const diff = spawnSync(
+    "git",
+    ["diff", "--no-index", "--no-color", "--", "/dev/null", absolutePath],
+    {
+      cwd: projectPath,
+      encoding: "utf8",
+      shell: false,
+    },
+  );
 
   return diff.stdout?.trim() || diff.stderr?.trim() || "";
 }
@@ -564,8 +588,19 @@ function getFileDiff(projectPath, status, filePath) {
   }
 
   const sections = [];
-  const staged = runGitCommand(projectPath, ["diff", "--cached", "--no-color", "--", filePath]);
-  const unstaged = runGitCommand(projectPath, ["diff", "--no-color", "--", filePath]);
+  const staged = runGitCommand(projectPath, [
+    "diff",
+    "--cached",
+    "--no-color",
+    "--",
+    filePath,
+  ]);
+  const unstaged = runGitCommand(projectPath, [
+    "diff",
+    "--no-color",
+    "--",
+    filePath,
+  ]);
 
   if (staged.stdout?.trim()) {
     sections.push(staged.stdout.trim());
@@ -604,7 +639,9 @@ function getDiffViewerData() {
       files: [],
       generatedAt: new Date().toISOString(),
       message:
-        status.stderr?.trim() || status.stdout?.trim() || "Không đọc được git status.",
+        status.stderr?.trim() ||
+        status.stdout?.trim() ||
+        "Không đọc được git status.",
     };
   }
 
@@ -666,7 +703,10 @@ async function startDiffViewerServer() {
   if (diffViewerServer) return;
 
   diffViewerServer = http.createServer((req, res) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const url = new URL(
+      req.url || "/",
+      `http://${req.headers.host || "localhost"}`,
+    );
     const pathname = url.pathname;
 
     if (req.method !== "GET") {
@@ -675,17 +715,29 @@ async function startDiffViewerServer() {
     }
 
     if (pathname === "/" || pathname === "/diff") {
-      sendStaticFile(res, path.join(WEB_ROOT, "index.html"), "text/html; charset=utf-8");
+      sendStaticFile(
+        res,
+        path.join(WEB_ROOT, "index.html"),
+        "text/html; charset=utf-8",
+      );
       return;
     }
 
     if (pathname === "/styles.css") {
-      sendStaticFile(res, path.join(WEB_ROOT, "styles.css"), "text/css; charset=utf-8");
+      sendStaticFile(
+        res,
+        path.join(WEB_ROOT, "styles.css"),
+        "text/css; charset=utf-8",
+      );
       return;
     }
 
     if (pathname === "/app.js") {
-      sendStaticFile(res, path.join(WEB_ROOT, "app.js"), "application/javascript; charset=utf-8");
+      sendStaticFile(
+        res,
+        path.join(WEB_ROOT, "app.js"),
+        "application/javascript; charset=utf-8",
+      );
       return;
     }
 
@@ -889,6 +941,18 @@ function trimForTelegram(text, limit = TELEGRAM_LIMIT) {
   return `...${text.slice(text.length - limit + 3)}`;
 }
 
+function summarizeFollowupMessage(text, limit = 120) {
+  const compact = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (compact.length <= limit) return compact;
+  return `${compact.slice(0, limit - 3).trimEnd()}...`;
+}
+
+function buildFollowupPrompt(message) {
+  return message.trim();
+}
+
 function stripAnsi(text) {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 }
@@ -988,6 +1052,7 @@ function getHelpText() {
     "/diff - xem link diff viewer và nút mở link",
     "/tasks - xem danh sách task trong todo.md",
     "/run <id> - chạy task theo id, ví dụ /run 1 hoặc /run 1.2",
+    "/reply <nội dung> - gửi prompt follow-up cho Codex trong thread hiện tại",
     "/status - xem Codex có đang chạy hay không",
     "/stop - dừng task Codex đang chạy hoặc xóa thread đã lưu",
     "/approve_commit - yêu cầu Codex kiểm tra diff và tạo commit nếu phù hợp",
@@ -1414,6 +1479,38 @@ bot.onText(/\/run (.+)/, (msg, match) => {
   const task = findTask(id);
   if (!task) return sendBotMessage(msg.chat.id, "Không tìm thấy tác vụ.");
   startCodexJob(msg.chat.id, task);
+});
+
+bot.onText(/^\/reply(?:@\w+)?\s+([\s\S]+)$/, (msg, match) => {
+  if (!auth(msg)) return;
+  if (activeCodexRun) {
+    return sendBotMessage(
+      msg.chat.id,
+      "⏳ Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
+    );
+  }
+
+  const feedback = match[1].trim();
+  if (!feedback) {
+    return sendBotMessage(
+      msg.chat.id,
+      "Thiếu nội dung prompt. Ví dụ: /reply Sửa lại header cho gọn hơn.",
+    );
+  }
+
+  const savedSession = readCodexSession(getProjectPath());
+  if (!savedSession) {
+    return sendBotMessage(
+      msg.chat.id,
+      "Chưa có thread Codex để sửa tiếp. Hãy chạy /run trước.",
+    );
+  }
+
+  return startCodexJob(
+    msg.chat.id,
+    `Phản hồi: ${summarizeFollowupMessage(feedback)}`,
+    buildFollowupPrompt(feedback),
+  );
 });
 
 bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {

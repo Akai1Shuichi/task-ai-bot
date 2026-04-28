@@ -142,6 +142,7 @@ Bot sẽ chạy `ngrok http http://127.0.0.1:3210 --log stdout` và đọc publi
 - `/help` - hướng dẫn dùng bot
 - `/tasks` - xem danh sách task và nút `Run`
 - `/run <id>` - chạy task theo id, ví dụ `/run 2` hoặc `/run 1.3`
+- `/reply <nội dung>` - gửi prompt follow-up cho Codex trong thread hiện tại
 - `/status` - xem trạng thái Codex hiện tại
 - `/stop` - dừng job đang chạy hoặc xóa session đã lưu
 - `/approve_commit` - yêu cầu Codex kiểm tra diff và tạo commit nếu phù hợp
@@ -152,8 +153,30 @@ Bot sẽ chạy `ngrok http http://127.0.0.1:3210 --log stdout` và đọc publi
 - Bot đọc `todo.md` của project để lấy task
 - `/tasks` hiển thị task dễ đọc hơn và có inline button `Run`
 - Bot giữ lại Codex thread id giữa các lần chạy
+- `/reply <nội dung>` gửi prompt follow-up vào thread Codex đã lưu
 - Bot stream output chạy task về Telegram
 - Bot validate startup config trước khi bắt đầu polling
+
+## Follow-up Sau Khi Chạy Task
+
+Sau khi chạy `/run <id>`, bot sẽ lưu `threadId` của Codex. Từ đó có thể gửi prompt follow-up trực tiếp trong cùng thread.
+
+```bash
+/reply Sửa lại phần step 1, UI còn rối và đổi nút save thành màu xanh đậm.
+```
+
+Ví dụ khác:
+
+```bash
+/reply Giải thích đoạn code vừa sửa trong auth middleware.
+/reply Tóm tắt phần changes vừa làm.
+/reply Sửa lại step 1 theo góp ý mới của dev.
+```
+
+Lưu ý:
+- `/reply` chỉ hoạt động khi đã có thread Codex được lưu từ lần chạy trước.
+- Nếu chưa từng chạy `/run`, bot sẽ yêu cầu chạy task trước.
+- Trong lúc Codex đang chạy, cần đợi xong hoặc dùng `/stop` trước khi gửi `/reply`.
 
 ## Security Notes
 
