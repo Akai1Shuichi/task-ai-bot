@@ -2,13 +2,13 @@ import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 
 dotenv.config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const allowed = String(process.env.ALLOWED_CHAT_ID);
-const bot = new TelegramBot(token, { polling: true });
+const bot = new TelegramBot(token, { polling: false });
 const TELEGRAM_LIMIT = 3900;
 const EDIT_INTERVAL_MS = 1200;
 const RUN_TIMEOUT_MS = 1000 * 60 * 30;
@@ -56,6 +56,83 @@ function sendBotMessage(chatId, text, options = {}) {
 
 function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+}
+
+function validateStartupConfig() {
+  const errors = [];
+
+  if (!token || token === "undefined") {
+    errors.push("Thiếu TELEGRAM_BOT_TOKEN trong .env.");
+  }
+
+  if (!allowed || allowed === "undefined") {
+    errors.push("Thiếu ALLOWED_CHAT_ID trong .env.");
+  }
+
+  if (!fs.existsSync(CONFIG_PATH)) {
+    errors.push(`Không tìm thấy config file: ${CONFIG_PATH}`);
+  }
+
+  let config;
+  if (!errors.length || fs.existsSync(CONFIG_PATH)) {
+    try {
+      config = loadConfig();
+    } catch (err) {
+      errors.push(`Không đọc được config.json: ${err.message}`);
+    }
+  }
+
+  if (config) {
+    if (!config.path || typeof config.path !== "string") {
+      errors.push("config.json thiếu trường path hợp lệ.");
+    } else {
+      const projectPath = path.resolve(config.path);
+      if (!fs.existsSync(projectPath)) {
+        errors.push(`Project path không tồn tại: ${projectPath}`);
+      } else if (!fs.statSync(projectPath).isDirectory()) {
+        errors.push(`Project path không phải thư mục: ${projectPath}`);
+      }
+    }
+
+    const baseProjectPath =
+      config.path && typeof config.path === "string"
+        ? path.resolve(config.path)
+        : process.cwd();
+    const todoFile = config.todoFile || "todo.md";
+    const todoPath = path.isAbsolute(todoFile)
+      ? todoFile
+      : path.resolve(baseProjectPath, todoFile);
+
+    if (!fs.existsSync(todoPath)) {
+      errors.push(`Todo file không tồn tại: ${todoPath}`);
+    } else if (!fs.statSync(todoPath).isFile()) {
+      errors.push(`Todo path không phải file: ${todoPath}`);
+    }
+  }
+
+  const codexCheck = spawnSync("codex", ["--version"], {
+    stdio: "ignore",
+    shell: false,
+  });
+  if (codexCheck.error || codexCheck.status !== 0) {
+    const detail = codexCheck.error?.message
+      ? ` (${codexCheck.error.message})`
+      : "";
+    errors.push(`Không chạy được lệnh codex${detail}.`);
+  }
+
+  if (errors.length) {
+    for (const error of errors) {
+      console.error(`Startup validation failed: ${error}`);
+    }
+    process.exit(1);
+  }
+}
+
+async function bootstrapBot() {
+  validateStartupConfig();
+  await setupTelegramCommands();
+  await bot.startPolling();
 }
 
 function getProjectPath() {
@@ -792,4 +869,7 @@ bot.on("callback_query", async (query) => {
   startCodexJob(chatId, task);
 });
 
-setupTelegramCommands();
+bootstrapBot().catch((err) => {
+  console.error("Failed to start Telegram bot:", err.message);
+  process.exit(1);
+});
