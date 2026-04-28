@@ -24,6 +24,14 @@ const TELEGRAM_COMMANDS = [
   { command: "stop", description: "Dừng task Codex đang chạy" },
   { command: "approve_commit", description: "Yêu cầu Codex tạo commit" },
 ];
+const REPLY_KEYBOARD = {
+  keyboard: [
+    [{ text: "Tasks" }, { text: "Status" }],
+    [{ text: "Help" }, { text: "Stop" }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+};
 let activeCodexRun = null;
 let activeCodexJob = null;
 
@@ -37,6 +45,13 @@ async function setupTelegramCommands() {
 
 function auth(msg) {
   return String(msg.chat.id) === allowed;
+}
+
+function sendBotMessage(chatId, text, options = {}) {
+  return bot.sendMessage(chatId, text, {
+    reply_markup: REPLY_KEYBOARD,
+    ...options,
+  });
 }
 
 function loadConfig() {
@@ -206,6 +221,12 @@ function getHelpText() {
     "2. Dùng /run <id> để chạy task",
     "3. Dùng /status để kiểm tra tiến trình",
     "4. Dùng /stop nếu cần dừng",
+    "",
+    "Nút nhanh:",
+    "- Tasks",
+    "- Status",
+    "- Help",
+    "- Stop",
     "",
     "Config hiện tại:",
     `- Project path: ${getProjectPath()}`,
@@ -506,7 +527,7 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
 
 bot.onText(/\/start/, (msg) => {
   if (!auth(msg)) return;
-  bot.sendMessage(
+  sendBotMessage(
     msg.chat.id,
     "Sẵn sàng. Dùng /tasks, /run 1.1, /status, /stop, hoặc /approve_commit",
   );
@@ -514,23 +535,23 @@ bot.onText(/\/start/, (msg) => {
 
 bot.onText(/^\/help(?:@\w+)?$/, (msg) => {
   if (!auth(msg)) return;
-  bot.sendMessage(msg.chat.id, getHelpText());
+  sendBotMessage(msg.chat.id, getHelpText());
 });
 
 bot.onText(/\/tasks/, (msg) => {
   if (!auth(msg)) return;
-  bot.sendMessage(msg.chat.id, readTodo());
+  sendBotMessage(msg.chat.id, readTodo());
 });
 
 bot.onText(/^\/status(?:@\w+)?$/, (msg) => {
   if (!auth(msg)) return;
-  bot.sendMessage(msg.chat.id, getCodexStatusText());
+  sendBotMessage(msg.chat.id, getCodexStatusText());
 });
 
 bot.onText(/\/run (.+)/, (msg, match) => {
   if (!auth(msg)) return;
   if (activeCodexRun) {
-    return bot.sendMessage(
+    return sendBotMessage(
       msg.chat.id,
       "Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
     );
@@ -538,7 +559,7 @@ bot.onText(/\/run (.+)/, (msg, match) => {
 
   const id = match[1].trim();
   const task = findTask(id);
-  if (!task) return bot.sendMessage(msg.chat.id, "Không tìm thấy tác vụ.");
+  if (!task) return sendBotMessage(msg.chat.id, "Không tìm thấy tác vụ.");
 
   activeCodexJob = {
     task,
@@ -553,7 +574,7 @@ bot.onText(/\/run (.+)/, (msg, match) => {
 
   activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob)
     .catch((err) => {
-      bot.sendMessage(msg.chat.id, `Không thể chạy Codex: ${err.message}`);
+      sendBotMessage(msg.chat.id, `Không thể chạy Codex: ${err.message}`);
     })
     .finally(() => {
       activeCodexRun = null;
@@ -564,7 +585,7 @@ bot.onText(/\/run (.+)/, (msg, match) => {
 bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
   if (!auth(msg)) return;
   if (activeCodexRun) {
-    return bot.sendMessage(
+    return sendBotMessage(
       msg.chat.id,
       "Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
     );
@@ -587,7 +608,7 @@ bot.onText(/^\/approve_commit(?:@\w+)?$/, (msg) => {
 
   activeCodexRun = runCodexRealtime(msg.chat.id, task, activeCodexJob, prompt)
     .catch((err) => {
-      bot.sendMessage(
+      sendBotMessage(
         msg.chat.id,
         `Không thể chạy Codex để duyệt commit: ${err.message}`,
       );
@@ -605,7 +626,7 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
     const projectPath = getProjectPath();
     const savedSession = readCodexSession(projectPath);
     const cleared = clearCodexSession();
-    return bot.sendMessage(
+    return sendBotMessage(
       msg.chat.id,
       savedSession || cleared
         ? "Không có tác vụ Codex nào đang chạy. Đã xóa threadId Codex đã lưu."
@@ -614,7 +635,7 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
   }
 
   if (activeCodexJob.stopRequested) {
-    return bot.sendMessage(msg.chat.id, "Đã yêu cầu dừng trước đó.");
+    return sendBotMessage(msg.chat.id, "Đã yêu cầu dừng trước đó.");
   }
 
   activeCodexJob.stopRequested = true;
@@ -625,14 +646,71 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
   await activeCodexJob.setLiveStatus?.("Đang dừng");
 
   if (!activeCodexJob.child) {
-    return bot.sendMessage(
+    return sendBotMessage(
       msg.chat.id,
       `Đã yêu cầu dừng: ${activeCodexJob.task}`,
     );
   }
 
   const signaled = terminateCodexJob(activeCodexJob);
-  return bot.sendMessage(
+  return sendBotMessage(
+    msg.chat.id,
+    signaled
+      ? `Đã gửi tín hiệu dừng: ${activeCodexJob.task}\nBot sẽ cập nhật tin nhắn đang chạy khi Codex thoát.`
+      : "Tác vụ Codex đang dừng hoặc đã kết thúc.",
+  );
+});
+
+bot.onText(/^Tasks$/i, (msg) => {
+  if (!auth(msg)) return;
+  sendBotMessage(msg.chat.id, readTodo());
+});
+
+bot.onText(/^Status$/i, (msg) => {
+  if (!auth(msg)) return;
+  sendBotMessage(msg.chat.id, getCodexStatusText());
+});
+
+bot.onText(/^Help$/i, (msg) => {
+  if (!auth(msg)) return;
+  sendBotMessage(msg.chat.id, getHelpText());
+});
+
+bot.onText(/^Stop$/i, async (msg) => {
+  if (!auth(msg)) return;
+
+  if (!activeCodexJob) {
+    const projectPath = getProjectPath();
+    const savedSession = readCodexSession(projectPath);
+    const cleared = clearCodexSession();
+    return sendBotMessage(
+      msg.chat.id,
+      savedSession || cleared
+        ? "Không có tác vụ Codex nào đang chạy. Đã xóa threadId Codex đã lưu."
+        : "Không có tác vụ Codex nào đang chạy. Không có threadId Codex đã lưu để xóa.",
+    );
+  }
+
+  if (activeCodexJob.stopRequested) {
+    return sendBotMessage(msg.chat.id, "Đã yêu cầu dừng trước đó.");
+  }
+
+  activeCodexJob.stopRequested = true;
+  activeCodexJob.stopReason = "Đã dừng bởi người dùng";
+  activeCodexJob.appendOutput?.(
+    "Đã yêu cầu dừng. Đang chờ tiến trình Codex thoát.",
+  );
+  await activeCodexJob.setLiveStatus?.("Đang dừng");
+
+  if (!activeCodexJob.child) {
+    return sendBotMessage(
+      msg.chat.id,
+      `Đã yêu cầu dừng: ${activeCodexJob.task}`,
+    );
+  }
+
+  const signaled = terminateCodexJob(activeCodexJob);
+  return sendBotMessage(
     msg.chat.id,
     signaled
       ? `Đã gửi tín hiệu dừng: ${activeCodexJob.task}\nBot sẽ cập nhật tin nhắn đang chạy khi Codex thoát.`
