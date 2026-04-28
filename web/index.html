@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diff Viewer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Codex Bot</p>
+          <h1>Diff Viewer</h1>
+          <p class="subtitle">
+            Xem nhanh những file vừa thay đổi trong project mà bot đang quản lý.
+          </p>
+        </div>
+        <div class="hero__actions">
+          <button id="refresh-button" type="button">Refresh</button>
+          <p id="updated-at" class="meta"></p>
+        </div>
+      </header>
+
+      <section class="summary">
+        <div class="summary__card">
+          <span class="summary__label">Project</span>
+          <strong id="project-path">-</strong>
+        </div>
+        <div class="summary__card">
+          <span class="summary__label">Changed Files</span>
+          <strong id="file-count">0</strong>
+        </div>
+        <div class="summary__card">
+          <span class="summary__label">Viewer URL</span>
+          <strong id="viewer-url">-</strong>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="sidebar panel">
+          <div class="panel__header">
+            <h2>Files</h2>
+            <span id="repo-state" class="badge">Checking...</span>
+          </div>
+          <p id="empty-state" class="empty-state hidden"></p>
+          <ul id="file-list" class="file-list"></ul>
+        </aside>
+
+        <section class="diff panel">
+          <div class="panel__header">
+            <h2 id="diff-title">Select a file</h2>
+            <span id="diff-status" class="badge badge--muted">No file selected</span>
+          </div>
+          <pre id="diff-output" class="diff-output">Chọn một file bên trái để xem diff.</pre>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

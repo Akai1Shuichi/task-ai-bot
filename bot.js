@@ -1,6 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { spawn, spawnSync } from "child_process";
 
@@ -15,6 +16,9 @@ const RUN_TIMEOUT_MS = 1000 * 60 * 30;
 const STOP_FORCE_KILL_MS = 1000 * 8;
 const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 const CODEX_SESSION_PATH = path.resolve(process.cwd(), ".codex-session.json");
+const WEB_ROOT = path.resolve(process.cwd(), "web");
+const DIFF_VIEWER_HOST = process.env.DIFF_VIEWER_HOST || "127.0.0.1";
+const DIFF_VIEWER_PORT = Number(process.env.DIFF_VIEWER_PORT || 3210);
 const TELEGRAM_COMMANDS = [
   { command: "start", description: "Khởi động bot và xem hướng dẫn nhanh" },
   { command: "help", description: "Xem hướng dẫn dùng bot" },
@@ -41,6 +45,7 @@ const REPLY_KEYBOARD = {
 let activeCodexRun = null;
 let activeCodexJob = null;
 let lastCompletedTask = "";
+let diffViewerServer = null;
 
 async function setupTelegramCommands() {
   try {
@@ -138,8 +143,13 @@ function validateStartupConfig() {
 
 async function bootstrapBot() {
   validateStartupConfig();
+  await startDiffViewerServer();
   await setupTelegramCommands();
   await bot.startPolling();
+}
+
+function getDiffViewerUrl() {
+  return `http://${DIFF_VIEWER_HOST}:${DIFF_VIEWER_PORT}`;
 }
 
 function getProjectPath() {
@@ -160,14 +170,18 @@ function readTodo() {
   return fs.readFileSync(getTodoPath(), "utf8");
 }
 
-function ensureProjectGitRepo(projectPath) {
+function checkProjectGitRepo(projectPath) {
   const check = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
     cwd: projectPath,
     encoding: "utf8",
     shell: false,
   });
 
-  if (check.status === 0 && check.stdout.trim() === "true") {
+  return check.status === 0 && check.stdout.trim() === "true";
+}
+
+function ensureProjectGitRepo(projectPath) {
+  if (checkProjectGitRepo(projectPath)) {
     return { ok: true, initialized: false };
   }
 
@@ -300,6 +314,177 @@ function approveCommitForLastTask() {
     ok: true,
     message: response.join("\n"),
   };
+}
+
+function normalizeStatusPath(rawPath) {
+  const clean = rawPath.trim().replace(/^"+|"+$/g, "");
+  if (clean.includes(" -> ")) {
+    return clean.split(" -> ").at(-1)?.replace(/^"+|"+$/g, "") || clean;
+  }
+  return clean;
+}
+
+function getUntrackedDiff(projectPath, filePath) {
+  const absolutePath = path.resolve(projectPath, filePath);
+  const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "--", "/dev/null", absolutePath], {
+    cwd: projectPath,
+    encoding: "utf8",
+    shell: false,
+  });
+
+  return diff.stdout?.trim() || diff.stderr?.trim() || "";
+}
+
+function getFileDiff(projectPath, status, filePath) {
+  if (status === "??") {
+    return getUntrackedDiff(projectPath, filePath);
+  }
+
+  const sections = [];
+  const staged = runGitCommand(projectPath, ["diff", "--cached", "--no-color", "--", filePath]);
+  const unstaged = runGitCommand(projectPath, ["diff", "--no-color", "--", filePath]);
+
+  if (staged.stdout?.trim()) {
+    sections.push(staged.stdout.trim());
+  }
+  if (unstaged.stdout?.trim()) {
+    sections.push(unstaged.stdout.trim());
+  }
+
+  return sections.join("\n\n").trim();
+}
+
+function getDiffViewerData() {
+  const projectPath = getProjectPath();
+  const repoReady = checkProjectGitRepo(projectPath);
+
+  if (!repoReady) {
+    return {
+      projectPath,
+      repoReady: false,
+      files: [],
+      generatedAt: new Date().toISOString(),
+      message: "Project hiện chưa có git repo.",
+    };
+  }
+
+  const status = runGitCommand(projectPath, [
+    "status",
+    "--short",
+    "--untracked-files=all",
+  ]);
+
+  if (status.status !== 0) {
+    return {
+      projectPath,
+      repoReady: true,
+      files: [],
+      generatedAt: new Date().toISOString(),
+      message:
+        status.stderr?.trim() || status.stdout?.trim() || "Không đọc được git status.",
+    };
+  }
+
+  const files = status.stdout
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => {
+      const statusCode = line.slice(0, 2);
+      const rawPath = line.slice(3);
+      const filePath = normalizeStatusPath(rawPath);
+
+      return {
+        path: filePath,
+        status: statusCode,
+        diff: getFileDiff(projectPath, statusCode, filePath),
+      };
+    });
+
+  return {
+    projectPath,
+    repoReady: true,
+    files,
+    generatedAt: new Date().toISOString(),
+    message: files.length ? "" : "Không có thay đổi nào trong working tree.",
+  };
+}
+
+function sendJson(res, data, statusCode = 200) {
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(data));
+}
+
+function sendText(res, text, statusCode = 200) {
+  res.writeHead(statusCode, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(text);
+}
+
+function sendStaticFile(res, filePath, contentType) {
+  try {
+    const content = fs.readFileSync(filePath);
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store",
+    });
+    res.end(content);
+  } catch (err) {
+    sendText(res, `Not found: ${err.message}`, 404);
+  }
+}
+
+async function startDiffViewerServer() {
+  if (diffViewerServer) return;
+
+  diffViewerServer = http.createServer((req, res) => {
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const pathname = url.pathname;
+
+    if (req.method !== "GET") {
+      sendText(res, "Method not allowed", 405);
+      return;
+    }
+
+    if (pathname === "/" || pathname === "/diff") {
+      sendStaticFile(res, path.join(WEB_ROOT, "index.html"), "text/html; charset=utf-8");
+      return;
+    }
+
+    if (pathname === "/styles.css") {
+      sendStaticFile(res, path.join(WEB_ROOT, "styles.css"), "text/css; charset=utf-8");
+      return;
+    }
+
+    if (pathname === "/app.js") {
+      sendStaticFile(res, path.join(WEB_ROOT, "app.js"), "application/javascript; charset=utf-8");
+      return;
+    }
+
+    if (pathname === "/api/diff") {
+      sendJson(res, {
+        ...getDiffViewerData(),
+        viewerUrl: getDiffViewerUrl(),
+      });
+      return;
+    }
+
+    sendText(res, "Not found", 404);
+  });
+
+  await new Promise((resolve, reject) => {
+    diffViewerServer.once("error", reject);
+    diffViewerServer.listen(DIFF_VIEWER_PORT, DIFF_VIEWER_HOST, () => {
+      diffViewerServer?.off("error", reject);
+      console.log(`Diff viewer listening at ${getDiffViewerUrl()}`);
+      resolve();
+    });
+  });
 }
 
 function getApproveCommitPromptOptions() {
@@ -557,6 +742,7 @@ function getWelcomeText() {
     "",
     `📁 Project: ${getProjectPath()}`,
     `📝 Todo file: ${getTodoPath()}`,
+    `🌐 Diff viewer: ${getDiffViewerUrl()}`,
     `📌 Task đang mở: ${openCount}/${tasks.length}`,
     `🧵 Thread đã lưu: ${savedSession?.threadId || "không có"}`,
     "",
@@ -593,6 +779,7 @@ function getHelpText() {
     "📁 Config hiện tại:",
     `- Project path: ${getProjectPath()}`,
     `- Todo file: ${getTodoPath()}`,
+    `- Diff viewer: ${getDiffViewerUrl()}`,
   ].join("\n");
 }
 
