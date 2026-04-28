@@ -15,8 +15,24 @@ const RUN_TIMEOUT_MS = 1000 * 60 * 30;
 const STOP_FORCE_KILL_MS = 1000 * 8;
 const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 const CODEX_SESSION_PATH = path.resolve(process.cwd(), ".codex-session.json");
+const TELEGRAM_COMMANDS = [
+  { command: "start", description: "Khởi động bot và xem hướng dẫn nhanh" },
+  { command: "tasks", description: "Xem danh sách task hiện tại" },
+  { command: "status", description: "Xem trạng thái phiên Codex" },
+  { command: "run", description: "Chạy task theo id, ví dụ /run 1" },
+  { command: "stop", description: "Dừng task Codex đang chạy" },
+  { command: "approve_commit", description: "Yêu cầu Codex tạo commit" },
+];
 let activeCodexRun = null;
 let activeCodexJob = null;
+
+async function setupTelegramCommands() {
+  try {
+    await bot.setMyCommands(TELEGRAM_COMMANDS);
+  } catch (err) {
+    console.error("Failed to register Telegram commands:", err.message);
+  }
+}
 
 function auth(msg) {
   return String(msg.chat.id) === allowed;
@@ -300,7 +316,9 @@ async function runCodexRealtime(chatId, task, job, promptOverride = "") {
   const liveMessage = await bot.sendMessage(
     chatId,
     `Đang chạy ${task}\n\n${
-      savedSession ? "Đang tiếp tục phiên Codex..." : "Đang bắt đầu phiên Codex..."
+      savedSession
+        ? "Đang tiếp tục phiên Codex..."
+        : "Đang bắt đầu phiên Codex..."
     }`,
   );
   const args = savedSession
@@ -590,3 +608,5 @@ bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
       : "Tác vụ Codex đang dừng hoặc đã kết thúc.",
   );
 });
+
+setupTelegramCommands();
