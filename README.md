@@ -37,6 +37,7 @@ cp .env.example .env
 Điền các giá trị:
 - `TELEGRAM_BOT_TOKEN`
 - `ALLOWED_CHAT_ID`
+- `DIFF_VIEWER_TUNNEL` - chọn cách public diff viewer, xem mục `Diff Viewer Tunnel` bên dưới
 
 3. Tạo config từ mẫu:
 
@@ -53,6 +54,87 @@ Sửa:
 ```bash
 node bot.js
 ```
+
+## Diff Viewer Tunnel
+
+Bot có thể public diff viewer local ra internet để bạn mở từ Telegram. Cấu hình này dùng biến môi trường `DIFF_VIEWER_TUNNEL`.
+
+Các giá trị hỗ trợ:
+- `none` - tắt public tunnel
+- `cloudflared` - dùng Cloudflare Tunnel
+- `ngrok` - dùng ngrok
+- `auto` - bot thử `cloudflared` trước, nếu không có thì thử `ngrok`
+
+Ví dụ trong `.env`:
+
+```env
+DIFF_VIEWER_TUNNEL=cloudflared
+```
+
+Lưu ý:
+- Repo này không tự cài tunnel tool giúp bạn.
+- Khi bật `cloudflared` hoặc `ngrok`, binary tương ứng phải được cài sẵn và có trong `PATH`.
+- Bot hiện gọi trực tiếp CLI hệ thống, không dùng package npm để mở tunnel.
+
+### Cài `cloudflared`
+
+Phù hợp nếu bạn muốn mở nhanh một public URL dạng `trycloudflare.com` cho local development.
+
+1. Cài `cloudflared` theo hướng dẫn chính thức của Cloudflare:
+   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+2. Kiểm tra đã cài xong:
+
+```bash
+cloudflared --version
+```
+
+3. Đặt trong `.env`:
+
+```env
+DIFF_VIEWER_TUNNEL=cloudflared
+```
+
+Bot sẽ chạy lệnh tương đương:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3210 --no-autoupdate
+```
+
+Tham khảo quick tunnel của Cloudflare:
+https://developers.cloudflare.com/tunnel/setup/
+
+### Cài `ngrok`
+
+Phù hợp nếu bạn đã dùng ngrok sẵn hoặc muốn dùng account/auth token của ngrok.
+
+1. Cài `ngrok` theo hướng dẫn chính thức:
+   https://ngrok.com/docs/getting-started
+2. Nếu ngrok yêu cầu, thêm auth token vào máy:
+
+```bash
+ngrok config add-authtoken <your-token>
+```
+
+3. Kiểm tra đã cài xong:
+
+```bash
+ngrok help
+```
+
+4. Đặt trong `.env`:
+
+```env
+DIFF_VIEWER_TUNNEL=ngrok
+```
+
+Bot sẽ chạy `ngrok http http://127.0.0.1:3210 --log stdout` và đọc public URL từ local API của ngrok.
+
+### Cấu hình đề xuất
+
+- Muốn đơn giản, không cần account: dùng `DIFF_VIEWER_TUNNEL=cloudflared`
+- Đã có ngrok account hoặc muốn giữ flow cũ: dùng `DIFF_VIEWER_TUNNEL=ngrok`
+- Muốn bot tự chọn theo tool nào đang có sẵn trên máy: dùng `DIFF_VIEWER_TUNNEL=auto`
+- Không cần truy cập diff viewer từ ngoài: dùng `DIFF_VIEWER_TUNNEL=none`
 
 ## Commands
 
