@@ -19,9 +19,12 @@ const CODEX_SESSION_PATH = path.resolve(process.cwd(), ".codex-session.json");
 const WEB_ROOT = path.resolve(process.cwd(), "web");
 const DIFF_VIEWER_HOST = process.env.DIFF_VIEWER_HOST || "127.0.0.1";
 const DIFF_VIEWER_PORT = Number(process.env.DIFF_VIEWER_PORT || 3210);
+const DIFF_VIEWER_TUNNEL = process.env.DIFF_VIEWER_TUNNEL || "none";
+const NGROK_API_URL = process.env.NGROK_API_URL || "http://127.0.0.1:4040/api/tunnels";
 const TELEGRAM_COMMANDS = [
   { command: "start", description: "Khởi động bot và xem hướng dẫn nhanh" },
   { command: "help", description: "Xem hướng dẫn dùng bot" },
+  { command: "diff", description: "Xem link diff viewer hiện tại" },
   { command: "tasks", description: "Xem danh sách task hiện tại" },
   { command: "status", description: "Xem trạng thái phiên Codex" },
   { command: "run", description: "Chạy task theo id, ví dụ /run 1" },
@@ -46,6 +49,9 @@ let activeCodexRun = null;
 let activeCodexJob = null;
 let lastCompletedTask = "";
 let diffViewerServer = null;
+let tunnelProcess = null;
+let tunnelPublicUrl = "";
+let tunnelProvider = "";
 
 async function setupTelegramCommands() {
   try {
@@ -144,12 +150,229 @@ function validateStartupConfig() {
 async function bootstrapBot() {
   validateStartupConfig();
   await startDiffViewerServer();
+  await startPublicTunnel();
   await setupTelegramCommands();
   await bot.startPolling();
 }
 
 function getDiffViewerUrl() {
   return `http://${DIFF_VIEWER_HOST}:${DIFF_VIEWER_PORT}`;
+}
+
+function getDiffViewerPublicUrl() {
+  return tunnelPublicUrl;
+}
+
+function getDiffViewerLinkText() {
+  return [
+    `🌐 Local diff viewer: ${getDiffViewerUrl()}`,
+    getDiffViewerPublicUrl()
+      ? `🚀 Public diff viewer: ${getDiffViewerPublicUrl()}`
+      : "🚧 Public diff viewer: chưa khả dụng",
+  ].join("\n");
+}
+
+function getDiffViewerLinkOptions() {
+  const inlineKeyboard = [];
+
+  if (getDiffViewerPublicUrl()) {
+    inlineKeyboard.push([
+      {
+        text: "🚀 Mở Diff Viewer",
+        url: getDiffViewerPublicUrl(),
+      },
+    ]);
+  }
+
+  return inlineKeyboard.length
+    ? {
+        reply_markup: {
+          inline_keyboard: inlineKeyboard,
+        },
+      }
+    : {};
+}
+
+function sendDiffViewerLinkMessage(chatId) {
+  return bot.sendMessage(
+    chatId,
+    [
+      "🔎 Diff viewer hiện tại:",
+      `🌐 Local: ${getDiffViewerUrl()}`,
+      getDiffViewerPublicUrl()
+        ? `🚀 Public: ${getDiffViewerPublicUrl()}`
+        : "🚧 Public: chưa khả dụng. Hãy kiểm tra tunnel (`ngrok` hoặc `cloudflared`).",
+    ].join("\n"),
+    getDiffViewerLinkOptions(),
+  );
+}
+
+function stopTunnelProcess() {
+  if (!tunnelProcess || tunnelProcess.exitCode !== null) return;
+
+  try {
+    tunnelProcess.kill("SIGTERM");
+  } catch (err) {
+    console.error("Failed to stop tunnel process:", err.message);
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchNgrokPublicUrl() {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const response = await fetch(NGROK_API_URL, { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        const httpsTunnel = data.tunnels?.find((tunnel) =>
+          String(tunnel.public_url || "").startsWith("https://"),
+        );
+        if (httpsTunnel?.public_url) {
+          return httpsTunnel.public_url;
+        }
+      }
+    } catch {
+      // Keep retrying while the local API starts up.
+    }
+
+    await wait(500);
+  }
+
+  return "";
+}
+
+function startCloudflaredTunnel() {
+  return spawn("cloudflared", ["tunnel", "--url", getDiffViewerUrl(), "--no-autoupdate"], {
+    cwd: process.cwd(),
+    env: process.env,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function startNgrokTunnel() {
+  return spawn("ngrok", ["http", getDiffViewerUrl(), "--log", "stdout"], {
+    cwd: process.cwd(),
+    env: process.env,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+async function startTunnelWithProvider(provider) {
+  let child = null;
+  let logs = "";
+  let resolved = false;
+
+  const captureLogs = (chunk) => {
+    logs += chunk.toString("utf8");
+    if (logs.length > 6000) {
+      logs = logs.slice(-6000);
+    }
+  };
+
+  try {
+    if (provider === "cloudflared") {
+      child = startCloudflaredTunnel();
+    } else if (provider === "ngrok") {
+      child = startNgrokTunnel();
+    } else {
+      return "";
+    }
+
+    tunnelProcess = child;
+    tunnelProvider = provider;
+    child.stdout.on("data", captureLogs);
+    child.stderr.on("data", captureLogs);
+
+    let publicUrl = "";
+    if (provider === "cloudflared") {
+      publicUrl = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Timed out waiting for cloudflared public URL."));
+        }, 15000);
+
+        const onData = (chunk) => {
+          const text = chunk.toString("utf8");
+          const match = text.match(/https:\/\/[a-z0-9.-]+trycloudflare\.com/i);
+          if (match) {
+            clearTimeout(timeout);
+            child.stdout.off("data", onData);
+            child.stderr.off("data", onData);
+            resolve(match[0]);
+          }
+        };
+
+        child.stdout.on("data", onData);
+        child.stderr.on("data", onData);
+        child.once("exit", () => {
+          clearTimeout(timeout);
+          reject(new Error("cloudflared exited before exposing a public URL."));
+        });
+      });
+    } else if (provider === "ngrok") {
+      publicUrl = await fetchNgrokPublicUrl();
+      if (!publicUrl) {
+        throw new Error("Timed out waiting for ngrok public URL.");
+      }
+    }
+
+    resolved = true;
+    return publicUrl;
+  } catch (err) {
+    if (child && child.exitCode === null) {
+      child.kill("SIGTERM");
+    }
+    tunnelProcess = null;
+    tunnelProvider = "";
+    console.error(
+      `Failed to start ${provider} tunnel:`,
+      logs.trim() || err.message,
+    );
+    return "";
+  } finally {
+    if (!resolved) {
+      tunnelPublicUrl = "";
+    }
+  }
+}
+
+async function startPublicTunnel() {
+  if (DIFF_VIEWER_TUNNEL === "none") return;
+
+  const providers =
+    DIFF_VIEWER_TUNNEL === "auto"
+      ? ["cloudflared", "ngrok"]
+      : [DIFF_VIEWER_TUNNEL];
+
+  for (const provider of providers) {
+    const binary = provider === "cloudflared" ? "cloudflared" : "ngrok";
+    const exists = spawnSync(binary, ["--version"], {
+      stdio: "ignore",
+      shell: false,
+    });
+
+    if (exists.status !== 0) continue;
+
+    const publicUrl = await startTunnelWithProvider(provider);
+    if (publicUrl) {
+      tunnelPublicUrl = publicUrl;
+      console.log(`Public diff viewer via ${provider}: ${publicUrl}`);
+      process.once("exit", stopTunnelProcess);
+      process.once("SIGINT", () => {
+        stopTunnelProcess();
+        process.exit(0);
+      });
+      process.once("SIGTERM", () => {
+        stopTunnelProcess();
+        process.exit(0);
+      });
+      return;
+    }
+  }
 }
 
 function getProjectPath() {
@@ -470,6 +693,7 @@ async function startDiffViewerServer() {
       sendJson(res, {
         ...getDiffViewerData(),
         viewerUrl: getDiffViewerUrl(),
+        publicViewerUrl: getDiffViewerPublicUrl(),
       });
       return;
     }
@@ -743,6 +967,9 @@ function getWelcomeText() {
     `📁 Project: ${getProjectPath()}`,
     `📝 Todo file: ${getTodoPath()}`,
     `🌐 Diff viewer: ${getDiffViewerUrl()}`,
+    getDiffViewerPublicUrl()
+      ? `🚀 Public link: ${getDiffViewerPublicUrl()}`
+      : "🚧 Public link: chưa khả dụng",
     `📌 Task đang mở: ${openCount}/${tasks.length}`,
     `🧵 Thread đã lưu: ${savedSession?.threadId || "không có"}`,
     "",
@@ -758,6 +985,7 @@ function getHelpText() {
     "🧭 Các lệnh hỗ trợ:",
     "/start - kiểm tra bot đang sẵn sàng",
     "/help - xem hướng dẫn và mô tả lệnh",
+    "/diff - xem link diff viewer và nút mở link",
     "/tasks - xem danh sách task trong todo.md",
     "/run <id> - chạy task theo id, ví dụ /run 1 hoặc /run 1.2",
     "/status - xem Codex có đang chạy hay không",
@@ -780,6 +1008,7 @@ function getHelpText() {
     `- Project path: ${getProjectPath()}`,
     `- Todo file: ${getTodoPath()}`,
     `- Diff viewer: ${getDiffViewerUrl()}`,
+    `- Public diff link: ${getDiffViewerPublicUrl() || "chưa khả dụng"}`,
   ].join("\n");
 }
 
@@ -1161,6 +1390,11 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/^\/help(?:@\w+)?$/, (msg) => {
   if (!auth(msg)) return;
   sendBotMessage(msg.chat.id, getHelpText());
+});
+
+bot.onText(/^\/diff(?:@\w+)?$/, (msg) => {
+  if (!auth(msg)) return;
+  sendDiffViewerLinkMessage(msg.chat.id);
 });
 
 bot.onText(/\/tasks/, (msg) => {
