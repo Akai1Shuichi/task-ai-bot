@@ -1,3 +1,7 @@
 /node_modules
 .codex-session.json
 .bot.pid
+.codex
+.codex-session.json
+.env
+config.json

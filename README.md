@@ -42,6 +42,16 @@ Phù hợp khi bạn muốn giữ workflow đơn giản:
 ```text
 .
 ├── bot.js
+├── src/
+│   ├── app.js
+│   ├── codex.js
+│   ├── config.js
+│   ├── constants.js
+│   ├── diff-viewer.js
+│   ├── git.js
+│   ├── session.js
+│   ├── telegram.js
+│   └── todo.js
 ├── config.example.json
 ├── config.json
 ├── package.json
@@ -52,6 +62,8 @@ Phù hợp khi bạn muốn giữ workflow đơn giản:
     ├── index.html
     └── styles.css
 ```
+
+`bot.js` là entrypoint mỏng; phần logic chính đã được tách vào `src/` theo từng domain.
 
 ## Quick Start
 
