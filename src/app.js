@@ -312,6 +312,19 @@ export async function bootstrapBot() {
       }
 
       const id = data.slice(4).trim();
+      const nextOpenTask = todo.getNextOpenTask();
+      if (!nextOpenTask || nextOpenTask.id !== id) {
+        if (query.id) {
+          await telegram.bot.answerCallbackQuery(query.id, {
+            text: nextOpenTask
+              ? `Task khả dụng hiện tại là ${nextOpenTask.id}. Hãy dùng nút Run mới nhất.`
+              : "Không còn task mở nào để chạy.",
+            show_alert: true,
+          });
+        }
+        return;
+      }
+
       const task = todo.findTask(id);
 
       if (!task) {

@@ -64,6 +64,10 @@ export function createTodoService({ readTodo }) {
     return parseTodoTasks().find((task) => task.id === normalizedId)?.raw;
   }
 
+  function getNextOpenTask(tasks = parseTodoTasks()) {
+    return tasks.find((task) => !task.done) || null;
+  }
+
   function getTaskSummaryText(tasks) {
     const doneCount = tasks.filter((task) => task.done).length;
     const openCount = tasks.length - doneCount;
@@ -84,21 +88,28 @@ export function createTodoService({ readTodo }) {
     }
 
     lines.push("");
-    lines.push("▶️ Có thể bấm nút Run bên dưới để chạy task chưa hoàn tất.");
+    const nextOpenTask = getNextOpenTask(tasks);
+    if (nextOpenTask) {
+      lines.push(
+        `▶️ Nút Run hiện chỉ mở cho task gần nhất: ${nextOpenTask.id}.`,
+      );
+    }
     return lines.join("\n");
   }
 
   function buildTasksInlineKeyboard(tasks) {
-    const openTasks = tasks.filter((task) => !task.done);
-    if (!openTasks.length) return undefined;
+    const nextOpenTask = getNextOpenTask(tasks);
+    if (!nextOpenTask) return undefined;
 
     return {
-      inline_keyboard: openTasks.map((task) => [
-        {
-          text: `▶️ Run ${task.id}`,
-          callback_data: `run:${task.id}`,
-        },
-      ]),
+      inline_keyboard: [
+        [
+          {
+            text: `▶️ Run ${nextOpenTask.id}`,
+            callback_data: `run:${nextOpenTask.id}`,
+          },
+        ],
+      ],
     };
   }
 
@@ -115,6 +126,7 @@ export function createTodoService({ readTodo }) {
   return {
     parseTodoTasks,
     findTask,
+    getNextOpenTask,
     getTasksMessagePayload,
   };
 }
