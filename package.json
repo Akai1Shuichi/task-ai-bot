@@ -2,6 +2,7 @@
   "name": "todo-telegram-agent",
   "version": "1.0.0",
   "type": "module",
+  "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
     "node-telegram-bot-api": "^0.66.0"

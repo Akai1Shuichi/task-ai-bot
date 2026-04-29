@@ -1,197 +1,198 @@
 # Codex Todo Telegram Bot
 
-Telegram bot để chạy Codex theo từng task trong `todo.md` của một project local.
+Telegram bot để điều khiển `codex` từ xa qua Telegram, theo từng task được viết trong `todo.md` của một project local.
 
-Bot này phù hợp cho flow:
-- bạn có một project local
-- bạn ghi task trong `todo.md`
-- bạn dùng Telegram để xem task, chạy task, theo dõi trạng thái, dừng job, và approve commit
+Phù hợp khi bạn muốn giữ workflow đơn giản:
 
-## Repo Structure
+- project chạy trên máy local
+- task được quản lý bằng `todo.md`
+- Codex xử lý từng task theo ID
+- trạng thái, diff và follow-up được theo dõi ngay trong Telegram
 
-- [bot/](/home/trtoan/Documents/GIAITRI/CONTENT/botAITodo/bot) - Telegram bot
-- [project/](/home/trtoan/Documents/GIAITRI/CONTENT/botAITodo/project) - project demo mẫu
+## Highlights
+
+- Chạy task theo ID từ `todo.md`
+- Xem danh sách task trực tiếp trong Telegram với nút `Run`
+- Gửi follow-up prompt vào đúng Codex thread đang lưu bằng `/reply`
+- Theo dõi tiến trình đang chạy với `/status`
+- Dừng job hiện tại hoặc xóa session với `/stop`
+- Mở diff viewer local hoặc public link qua tunnel
+- Approve commit ngay từ Telegram với `/approve_commit`
+- Tự kiểm tra config và môi trường trước khi bot bắt đầu polling
+
+## How It Works
+
+1. Bot đọc `config.json` để biết project nào sẽ được Codex thao tác.
+2. Bot parse `todo.md` để lấy danh sách task theo ID như `1`, `1.2`, `2.1`.
+3. Khi chạy `/run <id>`, bot gọi `codex` trong thư mục project đã cấu hình.
+4. Kết quả và trạng thái được stream về Telegram.
+5. Thread Codex được lưu lại để bạn tiếp tục bằng `/reply`.
+6. Diff viewer hiển thị thay đổi hiện tại; nếu bật tunnel, bot sẽ trả public URL để mở từ Telegram.
 
 ## Requirements
 
-- Node.js 18+
-- `codex` CLI có sẵn trong `PATH`
+- Node.js `18+`
+- `codex` CLI có trong `PATH`
 - Telegram bot token từ BotFather
-- Telegram chat id được phép dùng bot
+- `chat_id` được phép sử dụng bot
+- Tùy chọn: `cloudflared` hoặc `ngrok` nếu muốn public diff viewer
 
-## Setup
+## Project Structure
 
-1. Cài dependencies:
+```text
+.
+├── bot.js
+├── config.example.json
+├── config.json
+├── package.json
+├── README.md
+├── todo.md
+└── web/
+    ├── app.js
+    ├── index.html
+    └── styles.css
+```
+
+## Quick Start
+
+### 1. Install dependencies
 
 ```bash
-cd bot
 npm install
 ```
 
-2. Tạo file env từ mẫu:
+### 2. Create environment file
 
 ```bash
 cp .env.example .env
 ```
 
-Điền các giá trị:
-- `TELEGRAM_BOT_TOKEN`
-- `ALLOWED_CHAT_ID`
-- `DIFF_VIEWER_TUNNEL` - chọn cách public diff viewer, xem mục `Diff Viewer Tunnel` bên dưới
+Cấu hình tối thiểu trong `.env`:
 
-3. Tạo config từ mẫu:
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+ALLOWED_CHAT_ID=123456789
+DIFF_VIEWER_TUNNEL=ngrok
+```
+
+### 3. Create runtime config
 
 ```bash
 cp config.example.json config.json
 ```
 
-Sửa:
-- `path`: đường dẫn tuyệt đối tới project bạn muốn Codex làm việc trên
-- `todoFile`: file task bên trong project đó, mặc định là `todo.md`
+Ví dụ:
 
-4. Chạy bot:
+```json
+{
+  "path": "/absolute/path/to/your/project",
+  "todoFile": "todo.md"
+}
+```
+
+Ý nghĩa các trường:
+
+| Field      | Required | Description                                            |
+| ---------- | -------- | ------------------------------------------------------ |
+| `path`     | Yes      | Đường dẫn tuyệt đối tới project mà Codex sẽ làm việc   |
+| `todoFile` | No       | Tên file task bên trong project, mặc định là `todo.md` |
+
+### 4. Start the bot
 
 ```bash
 node bot.js
 ```
 
-## Diff Viewer Tunnel
+Khi khởi động thành công, bot sẽ:
 
-Bot có thể public diff viewer local ra internet để bạn mở từ Telegram. Cấu hình này dùng biến môi trường `DIFF_VIEWER_TUNNEL`.
+- validate `.env`, `config.json`, project path và `todo.md`
+- kiểm tra `codex --version`
+- khởi chạy diff viewer tại `http://127.0.0.1:3210` mặc định
+- mở public tunnel nếu `DIFF_VIEWER_TUNNEL` được bật
 
-Các giá trị hỗ trợ:
-- `none` - tắt public tunnel
-- `cloudflared` - dùng Cloudflare Tunnel
-- `ngrok` - dùng ngrok
-- `auto` - bot thử `cloudflared` trước, nếu không có thì thử `ngrok`
+## Telegram Commands
 
-Ví dụ trong `.env`:
+| Command           | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `/start`          | Kiểm tra bot đã sẵn sàng và xem onboarding ngắn   |
+| `/help`           | Xem danh sách lệnh và config hiện tại             |
+| `/diff`           | Lấy link diff viewer local/public                 |
+| `/tasks`          | Xem danh sách task parse từ `todo.md`             |
+| `/run <id>`       | Chạy task theo ID, ví dụ `/run 1` hoặc `/run 1.2` |
+| `/reply <prompt>` | Gửi follow-up prompt vào Codex thread hiện tại    |
+| `/status`         | Xem Codex có đang chạy hay không                  |
+| `/stop`           | Dừng job đang chạy hoặc xóa session đã lưu        |
+| `/approve_commit` | Stage toàn bộ thay đổi và commit nếu phù hợp      |
 
-```env
-DIFF_VIEWER_TUNNEL=cloudflared
+Ngoài slash commands, bot cũng có reply keyboard nhanh cho `Tasks`, `Status`, `Help`, `Stop`.
+
+## Expected `todo.md` Format
+
+Bot hỗ trợ các dòng task có ID dạng số hoặc phân cấp. Ví dụ:
+
+```md
+- [ ] 1. Setup authentication
+- [ ] 1.1 Add login endpoint
+- [x] 2. Refactor navbar
 ```
 
-Lưu ý:
-- Repo này không tự cài tunnel tool giúp bạn.
-- Khi bật `cloudflared` hoặc `ngrok`, binary tương ứng phải được cài sẵn và có trong `PATH`.
-- Bot hiện gọi trực tiếp CLI hệ thống, không dùng package npm để mở tunnel.
+Task đã hoàn tất có thể đánh dấu `[x]`, bot vẫn parse được đầy đủ.
 
-### Cài `cloudflared`
+## Diff Viewer Tunnel
 
-Phù hợp nếu bạn muốn mở nhanh một public URL dạng `trycloudflare.com` cho local development.
+Diff viewer luôn chạy local. Nếu muốn mở từ điện thoại hoặc ngoài mạng nội bộ, cấu hình `DIFF_VIEWER_TUNNEL` trong `.env`.
 
-1. Cài `cloudflared` theo hướng dẫn chính thức của Cloudflare:
-   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
-2. Kiểm tra đã cài xong:
+| Value         | Description                                    |
+| ------------- | ---------------------------------------------- |
+| `none`        | Không public diff viewer                       |
+| `cloudflared` | Dùng Cloudflare Tunnel                         |
+| `ngrok`       | Dùng ngrok                                     |
+| `auto`        | Thử `cloudflared` trước, fallback sang `ngrok` |
+
+### `cloudflared`
 
 ```bash
 cloudflared --version
 ```
 
-3. Đặt trong `.env`:
-
-```env
-DIFF_VIEWER_TUNNEL=cloudflared
-```
-
-Bot sẽ chạy lệnh tương đương:
+Bot sẽ chạy:
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:3210 --no-autoupdate
 ```
 
-Tham khảo quick tunnel của Cloudflare:
-https://developers.cloudflare.com/tunnel/setup/
-
-### Cài `ngrok`
-
-Phù hợp nếu bạn đã dùng ngrok sẵn hoặc muốn dùng account/auth token của ngrok.
-
-1. Cài `ngrok` theo hướng dẫn chính thức:
-   https://ngrok.com/docs/getting-started
-2. Nếu ngrok yêu cầu, thêm auth token vào máy:
-
-```bash
-ngrok config add-authtoken <your-token>
-```
-
-3. Kiểm tra đã cài xong:
+### `ngrok`
 
 ```bash
 ngrok help
 ```
 
-4. Đặt trong `.env`:
-
-```env
-DIFF_VIEWER_TUNNEL=ngrok
-```
-
-Bot sẽ chạy `ngrok http http://127.0.0.1:3210 --log stdout` và đọc public URL từ local API của ngrok.
-
-### Cấu hình đề xuất
-
-- Muốn đơn giản, không cần account: dùng `DIFF_VIEWER_TUNNEL=cloudflared`
-- Đã có ngrok account hoặc muốn giữ flow cũ: dùng `DIFF_VIEWER_TUNNEL=ngrok`
-- Muốn bot tự chọn theo tool nào đang có sẵn trên máy: dùng `DIFF_VIEWER_TUNNEL=auto`
-- Không cần truy cập diff viewer từ ngoài: dùng `DIFF_VIEWER_TUNNEL=none`
-
-## Commands
-
-- `/start` - màn hình welcome và onboarding ngắn
-- `/help` - hướng dẫn dùng bot
-- `/tasks` - xem danh sách task và nút `Run`
-- `/run <id>` - chạy task theo id, ví dụ `/run 2` hoặc `/run 1.3`
-- `/reply <nội dung>` - gửi prompt follow-up cho Codex trong thread hiện tại
-- `/status` - xem trạng thái Codex hiện tại
-- `/stop` - dừng job đang chạy hoặc xóa session đã lưu
-- `/approve_commit` - yêu cầu Codex kiểm tra diff và tạo commit nếu phù hợp
-
-## Current Behavior
-
-- Bot đọc project path từ `bot/config.json`
-- Bot đọc `todo.md` của project để lấy task
-- `/tasks` hiển thị task dễ đọc hơn và có inline button `Run`
-- Bot giữ lại Codex thread id giữa các lần chạy
-- `/reply <nội dung>` gửi prompt follow-up vào thread Codex đã lưu
-- Bot stream output chạy task về Telegram
-- Bot validate startup config trước khi bắt đầu polling
-
-## Follow-up Sau Khi Chạy Task
-
-Sau khi chạy `/run <id>`, bot sẽ lưu `threadId` của Codex. Từ đó có thể gửi prompt follow-up trực tiếp trong cùng thread.
+Bot sẽ chạy:
 
 ```bash
-/reply Sửa lại phần step 1, UI còn rối và đổi nút save thành màu xanh đậm.
+ngrok http http://127.0.0.1:3210 --log stdout
 ```
 
-Ví dụ khác:
+Nếu dùng `ngrok`, bạn có thể cần cấu hình auth token trước:
 
 ```bash
-/reply Giải thích đoạn code vừa sửa trong auth middleware.
-/reply Tóm tắt phần changes vừa làm.
-/reply Sửa lại step 1 theo góp ý mới của dev.
+ngrok config add-authtoken <your-token>
 ```
 
-Lưu ý:
-- `/reply` chỉ hoạt động khi đã có thread Codex được lưu từ lần chạy trước.
-- Nếu chưa từng chạy `/run`, bot sẽ yêu cầu chạy task trước.
-- Trong lúc Codex đang chạy, cần đợi xong hoặc dùng `/stop` trước khi gửi `/reply`.
+## Workflow Gợi Ý
 
-## Security Notes
+1. Mở `/tasks` để lấy ID task cần làm.
+2. Chạy `/run <id>`.
+3. Theo dõi bằng `/status`.
+4. Mở `/diff` để xem thay đổi hiện tại.
+5. Dùng `/reply` nếu muốn Codex sửa tiếp trong cùng thread.
+6. Dùng `/approve_commit` khi muốn tạo commit từ task vừa hoàn tất.
 
-- Bot chỉ trả lời chat id khớp với `ALLOWED_CHAT_ID`
-- Không commit `.env`
-- Không dùng bot này cho máy hoặc project mà bạn không tin tưởng mức truy cập của Codex
+## Notes
 
-## Limitations
-
-- Hiện chỉ hỗ trợ một chat được phép dùng bot
-- Hiện chỉ xử lý một Codex job tại một thời điểm
-- Chưa có flow approve plan trước khi sửa file
-- Chưa có UI cấu hình trong Telegram
-- `config.json` hiện dùng đường dẫn tuyệt đối
-
-## Demo Project
-
-Thư mục [project/](/home/trtoan/Documents/GIAITRI/CONTENT/botAITodo/project) chỉ là ví dụ tối thiểu để test bot. README riêng của project demo nằm ở [project/README.md](/home/trtoan/Documents/GIAITRI/CONTENT/botAITodo/project/README.md).
+- Bot chỉ cho phép đúng `ALLOWED_CHAT_ID` sử dụng.
+- Mỗi thời điểm chỉ xử lý một Codex job.
+- Session Codex được lưu trong `.codex-session.json`.
+- Khi dùng `/approve_commit`, bot sẽ dùng task hoàn tất gần nhất làm commit message.
+- Nếu project chưa là git repo, bot sẽ thử `git init` trước khi commit.
+- Không nên commit `.env`, `config.json` hoặc session file vào repo public.
