@@ -1,4 +1,6 @@
 {
   "path": "/home/trtoan/Documents/GIAITRI/CONTENT/botAITodo/project",
-  "todoFile": "todo.md"
+  "todoFile": "todo.md",
+  "model": "gpt-5.5",
+  "reasoningEffort": "high"
 }

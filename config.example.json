@@ -1,4 +1,6 @@
 {
   "path": "/absolute/path/to/your/project",
-  "todoFile": "todo.md"
+  "todoFile": "todo.md",
+  "model": "gpt-5.4",
+  "reasoningEffort": "medium"
 }

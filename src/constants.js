@@ -28,6 +28,7 @@ export const TELEGRAM_COMMANDS = [
   { command: "diff", description: "Xem link diff viewer hiện tại" },
   { command: "tasks", description: "Xem danh sách task hiện tại" },
   { command: "status", description: "Xem trạng thái phiên Codex" },
+  { command: "model", description: "Xem và chọn model/reasoning của Codex" },
   { command: "run", description: "Chạy task theo id, ví dụ /run 1" },
   {
     command: "reply",
@@ -52,3 +53,53 @@ export const REPLY_KEYBOARD = {
   resize_keyboard: true,
   is_persistent: true,
 };
+
+export const DEFAULT_CODEX_MODEL = "gpt-5.5";
+
+export const CODEX_MODEL_SUGGESTIONS = [
+  {
+    id: "gpt-5.5",
+    label:
+      "Mô hình tiên tiến cho lập trình phức tạp, nghiên cứu và các tác vụ thực tế.",
+  },
+  {
+    id: "gpt-5.4",
+    label: "Mô hình mạnh cho các tác vụ lập trình hằng ngày.",
+  },
+  {
+    id: "gpt-5.4-mini",
+    label:
+      "Nhỏ gọn, nhanh và tiết kiệm chi phí cho các tác vụ lập trình đơn giản.",
+  },
+  {
+    id: "gpt-5.3-codex",
+    label: "Mô hình được tối ưu hóa cho lập trình.",
+  },
+  {
+    id: "gpt-5.2",
+    label: "Tối ưu cho công việc chuyên nghiệp và các agent chạy dài.",
+  },
+];
+
+export const CODEX_REASONING_SUGGESTIONS = [
+  {
+    id: "minimal",
+    label: "Nhanh nhất, hợp task rất đơn giản",
+  },
+  {
+    id: "low",
+    label: "Nhanh, hợp chỉnh sửa nhỏ hoặc follow-up ngắn",
+  },
+  {
+    id: "medium",
+    label: "Cân bằng, nên dùng mặc định",
+  },
+  {
+    id: "high",
+    label: "Sâu hơn, hợp refactor hoặc bug khó",
+  },
+  {
+    id: "xhigh",
+    label: "Sâu nhất, chậm hơn; chỉ một số model hỗ trợ",
+  },
+];

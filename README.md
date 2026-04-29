@@ -98,7 +98,9 @@ Ví dụ:
 ```json
 {
   "path": "/absolute/path/to/your/project",
-  "todoFile": "todo.md"
+  "todoFile": "todo.md",
+  "model": "your-preferred-model",
+  "reasoningEffort": "medium"
 }
 ```
 
@@ -108,6 +110,8 @@ Ví dụ:
 | ---------- | -------- | ------------------------------------------------------ |
 | `path`     | Yes      | Đường dẫn tuyệt đối tới project mà Codex sẽ làm việc   |
 | `todoFile` | No       | Tên file task bên trong project, mặc định là `todo.md` |
+| `model`    | No       | Model truyền vào `codex --model`, có thể đổi bằng bot  |
+| `reasoningEffort` | No | Reasoning effort, map sang `model_reasoning_effort`     |
 
 ### 4. Start the bot
 
@@ -130,6 +134,9 @@ Khi khởi động thành công, bot sẽ:
 | `/help`           | Xem danh sách lệnh và config hiện tại             |
 | `/diff`           | Lấy link diff viewer local/public                 |
 | `/tasks`          | Xem danh sách task parse từ `todo.md`             |
+| `/model`          | Xem model/reasoning hiện tại và chọn bằng nút     |
+| `/model <name>`   | Đổi model thủ công cho các lần chạy tiếp theo     |
+| `/reason <name>`  | Đổi reasoning effort thủ công cho các lần chạy tiếp theo |
 | `/run <id>`       | Chạy task theo ID, ví dụ `/run 1` hoặc `/run 1.2` |
 | `/reply <prompt>` | Gửi follow-up prompt vào Codex thread hiện tại    |
 | `/status`         | Xem Codex có đang chạy hay không                  |
@@ -197,14 +204,19 @@ ngrok config add-authtoken <your-token>
 2. Chạy `/run <id>`.
 3. Theo dõi bằng `/status`.
 4. Mở `/diff` để xem thay đổi hiện tại.
-5. Dùng `/reply` nếu muốn Codex sửa tiếp trong cùng thread.
-6. Dùng `/approve_commit` khi muốn tạo commit từ task vừa hoàn tất.
+5. Dùng `/model` để chọn model hoặc reasoning bằng nút.
+6. Dùng `/model <name>` nếu muốn đổi model thủ công.
+7. Dùng `/reason <minimal|low|medium|high|xhigh>` nếu muốn đổi reasoning thủ công.
+8. Dùng `/reply` nếu muốn Codex sửa tiếp trong cùng thread.
+9. Dùng `/approve_commit` khi muốn tạo commit từ task vừa hoàn tất.
 
 ## Notes
 
 - Bot chỉ cho phép đúng `ALLOWED_CHAT_ID` sử dụng.
 - Mỗi thời điểm chỉ xử lý một Codex job.
 - Session Codex được lưu trong `.codex-session.json`.
+- Có thể đổi model runtime bằng `/model`; bot sẽ ghi lại vào `config.json`.
+- Có thể đổi reasoning effort runtime bằng `/reason`; bot sẽ ghi lại vào `config.json`.
 - Khi dùng `/approve_commit`, bot sẽ dùng task hoàn tất gần nhất làm commit message.
 - Nếu project chưa là git repo, bot sẽ thử `git init` trước khi commit.
 - Không nên commit `.env`, `config.json` hoặc session file vào repo public.

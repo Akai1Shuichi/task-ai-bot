@@ -10,6 +10,8 @@ import { isCodexThreadId } from "./session.js";
 
 export function createCodexService({
   bot,
+  getCodexModel,
+  getCodexReasoningEffort,
   getProjectPath,
   getTodoPath,
   readCodexSession,
@@ -35,12 +37,16 @@ export function createCodexService({
   function getStatusText() {
     const projectPath = getProjectPath();
     const savedSession = readCodexSession(projectPath);
+    const codexModel = getCodexModel?.() || "";
+    const codexReasoningEffort = getCodexReasoningEffort?.() || "";
 
     if (!activeCodexJob) {
       return [
         "📊 Trạng thái Codex: đang tắt",
         "🫥 Không có tác vụ nào đang chạy.",
         `📁 Dự án: ${projectPath}`,
+        `🧠 Model: ${codexModel || "mặc định của Codex CLI"}`,
+        `🧩 Reasoning: ${codexReasoningEffort || "mặc định của Codex CLI"}`,
         `🧵 Thread: ${savedSession?.threadId || "không có"}`,
       ].join("\n");
     }
@@ -63,6 +69,8 @@ export function createCodexService({
       `🧩 Tác vụ: ${activeCodexJob.task}`,
       `⏱️ Thời gian chạy: ${elapsed}`,
       `📁 Dự án: ${projectPath}`,
+      `🧠 Model: ${codexModel || "mặc định của Codex CLI"}`,
+      `🧩 Reasoning: ${codexReasoningEffort || "mặc định của Codex CLI"}`,
       `🧵 Thread: ${savedSession?.threadId || "không có"}`,
     ].join("\n");
   }
@@ -203,6 +211,8 @@ export function createCodexService({
   ) {
     const projectPath = getProjectPath();
     const todoPath = getTodoPath();
+    const codexModel = getCodexModel?.() || "";
+    const codexReasoningEffort = getCodexReasoningEffort?.() || "";
     const prompt = promptOverride || `Read ${todoPath} and complete task ${task}`;
     const sessionMode = options.sessionMode || "reuse";
     const shouldReuseSession = sessionMode !== "isolated";
@@ -213,25 +223,33 @@ export function createCodexService({
         savedSession
           ? "Đang tiếp tục phiên Codex..."
           : "Đang bắt đầu phiên Codex..."
+      }${codexModel ? `\nModel: ${codexModel}` : ""}${
+        codexReasoningEffort ? `\nReasoning: ${codexReasoningEffort}` : ""
       }`,
     );
-    const args = savedSession
-      ? [
-          "exec",
-          "resume",
-          "--skip-git-repo-check",
-          "--json",
-          savedSession.threadId,
-          prompt,
-        ]
-      : [
-          "exec",
-          "--skip-git-repo-check",
-          "--sandbox",
-          "workspace-write",
-          "--json",
-          prompt,
-        ];
+    const args = savedSession ? ["exec", "resume"] : ["exec"];
+
+    if (codexModel) {
+      args.push("--model", codexModel);
+    }
+
+    if (codexReasoningEffort) {
+      args.push("-c", `model_reasoning_effort="${codexReasoningEffort}"`);
+    }
+
+    args.push("--skip-git-repo-check");
+
+    if (!savedSession) {
+      args.push("--sandbox", "workspace-write");
+    }
+
+    args.push("--json");
+
+    if (savedSession) {
+      args.push(savedSession.threadId);
+    }
+
+    args.push(prompt);
     const child = spawn("codex", args, {
       cwd: projectPath,
       env: process.env,
