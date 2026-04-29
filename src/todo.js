@@ -68,6 +68,19 @@ export function createTodoService({ readTodo }) {
     return tasks.find((task) => !task.done) || null;
   }
 
+  function getLastCompletedTaskBeforeNextOpen(tasks = parseTodoTasks()) {
+    const nextOpenIndex = tasks.findIndex((task) => !task.done);
+    const searchFrom = nextOpenIndex === -1 ? tasks.length - 1 : nextOpenIndex - 1;
+
+    for (let index = searchFrom; index >= 0; index -= 1) {
+      if (tasks[index].done) {
+        return tasks[index];
+      }
+    }
+
+    return null;
+  }
+
   function getTaskSummaryText(tasks) {
     const doneCount = tasks.filter((task) => task.done).length;
     const openCount = tasks.length - doneCount;
@@ -126,6 +139,7 @@ export function createTodoService({ readTodo }) {
   return {
     parseTodoTasks,
     findTask,
+    getLastCompletedTaskBeforeNextOpen,
     getNextOpenTask,
     getTasksMessagePayload,
   };

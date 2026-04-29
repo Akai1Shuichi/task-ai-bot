@@ -11,7 +11,11 @@ import {
 } from "./config.js";
 import { createCodexService } from "./codex.js";
 import { createDiffViewerService } from "./diff-viewer.js";
-import { approveCommitForTask, ensureProjectGitRepo } from "./git.js";
+import {
+  approveCommitForTask,
+  ensureProjectGitRepo,
+  hasGitChanges,
+} from "./git.js";
 import {
   clearCodexSession,
   readCodexSession,
@@ -26,6 +30,7 @@ export async function bootstrapBot() {
     allowedChatId: ALLOWED_CHAT_ID,
   });
   const todo = createTodoService({ readTodo });
+  const pendingCommitApprovals = new Map();
 
   function getGitReadyMessage(result) {
     if (!result?.ok) {
@@ -49,9 +54,54 @@ export async function bootstrapBot() {
     return result;
   }
 
-  async function sendApproveCommitPrompt(chatId, task) {
-    if (!task) return;
+  function storePendingCommitApproval(task) {
+    const token = `${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    pendingCommitApprovals.set(token, task);
+    return token;
+  }
 
+  function resolveCommitTaskCandidate(taskOverride = "") {
+    const task = taskOverride || codex.getLastCompletedTask();
+    if (task) return task;
+
+    return todo.getLastCompletedTaskBeforeNextOpen()?.raw || "";
+  }
+
+  function truncateButtonLabel(text, limit = 32) {
+    if (!text || text.length <= limit) return text;
+    return `${text.slice(0, limit - 3).trimEnd()}...`;
+  }
+
+  function buildCommitApprovalPayload(taskOverride = "") {
+    const gitChanges = hasGitChanges(getProjectPath());
+    if (!gitChanges.ok) {
+      return {
+        ok: false,
+        message: gitChanges.message,
+      };
+    }
+
+    if (!gitChanges.hasChanges) {
+      return {
+        ok: true,
+        prompt: false,
+        message: "🫥 Không có thay đổi nào để commit.",
+      };
+    }
+
+    const task = resolveCommitTaskCandidate(taskOverride);
+    if (!task) {
+      return {
+        ok: false,
+        message:
+          "⚠️ Có thay đổi Git nhưng chưa xác định được task hoàn tất để dùng làm commit message.",
+      };
+    }
+
+    const commitMessage = formatTaskForCommitMessage(task);
+    const token = storePendingCommitApproval(task);
     const diffLines = [
       `🌐 Diff viewer: ${diffViewer.getDiffViewerUrl()}`,
       diffViewer.getDiffViewerPublicUrl()
@@ -71,27 +121,40 @@ export async function bootstrapBot() {
 
     inlineKeyboard.push([
       {
-        text: "✅ Commit luôn",
-        callback_data: "approve_commit",
+        text: `✅ Commit: ${truncateButtonLabel(commitMessage)}`,
+        callback_data: `commit_task:${token}`,
       },
     ]);
 
-    await telegram.bot.sendMessage(
-      chatId,
-      [
-        "✅ Codex đã hoàn tất task.",
-        `🧩 Task gần nhất: ${formatTaskForCommitMessage(task)}`,
+    return {
+      ok: true,
+      prompt: true,
+      message: [
+        "✅ Đã tìm thấy thay đổi Git chưa commit.",
+        `🧩 Task dùng làm commit message: ${commitMessage}`,
         "",
         ...diffLines,
         "",
-        "Bạn có muốn commit luôn không?",
+        "Bấm nút bên dưới để tạo commit.",
       ].join("\n"),
-      {
+      options: {
         reply_markup: {
           inline_keyboard: inlineKeyboard,
         },
       },
-    );
+    };
+  }
+
+  async function sendApproveCommitPrompt(chatId, task) {
+    const payload = buildCommitApprovalPayload(task);
+    if (!payload.ok || !payload.prompt) {
+      if (payload?.message) {
+        await telegram.sendBotMessage(chatId, payload.message);
+      }
+      return;
+    }
+
+    await telegram.bot.sendMessage(chatId, payload.message, payload.options);
   }
 
   const codex = createCodexService({
@@ -112,14 +175,6 @@ export async function bootstrapBot() {
     requestDiffExplanation: ({ task, prompt }) =>
       codex.queueDiffExplanation(ALLOWED_CHAT_ID, task, prompt),
   });
-
-  function approveCommitForLastTask() {
-    return approveCommitForTask(
-      getProjectPath(),
-      codex.getLastCompletedTask(),
-      formatTaskForCommitMessage,
-    );
-  }
 
   function getWelcomeText() {
     const tasks = todo.parseTodoTasks();
@@ -239,8 +294,7 @@ export async function bootstrapBot() {
         );
       }
 
-      const result = approveCommitForLastTask();
-      return telegram.sendBotMessage(msg.chat.id, result.message);
+      return sendApproveCommitPrompt(msg.chat.id);
     });
 
     telegram.bot.onText(/^\/stop(?:@\w+)?$/, async (msg) => {
@@ -293,13 +347,56 @@ export async function bootstrapBot() {
           return;
         }
 
+        const payload = buildCommitApprovalPayload();
+        if (query.id) {
+          await telegram.bot.answerCallbackQuery(query.id, {
+            text: payload.prompt ? "📝 Đã tạo nút xác nhận commit" : "ℹ️ Không có commit để xác nhận",
+          });
+        }
+        if (payload.prompt) {
+          await telegram.bot.sendMessage(chatId, payload.message, payload.options);
+        } else if (payload.message) {
+          await telegram.sendBotMessage(chatId, payload.message);
+        }
+        return;
+      }
+
+      if (data.startsWith("commit_task:")) {
+        if (codex.isRunning()) {
+          if (query.id) {
+            await telegram.bot.answerCallbackQuery(query.id, {
+              text: "⏳ Codex vẫn đang chạy. Chưa thể commit.",
+            });
+          }
+          return;
+        }
+
+        const token = data.slice("commit_task:".length).trim();
+        const task = pendingCommitApprovals.get(token);
+
+        if (!task) {
+          if (query.id) {
+            await telegram.bot.answerCallbackQuery(query.id, {
+              text: "⚠️ Nút commit này đã hết hạn hoặc không hợp lệ.",
+              show_alert: true,
+            });
+          }
+          return;
+        }
+
+        pendingCommitApprovals.delete(token);
+
         if (query.id) {
           await telegram.bot.answerCallbackQuery(query.id, {
             text: "✅ Đang tạo commit",
           });
         }
 
-        const result = approveCommitForLastTask();
+        const result = approveCommitForTask(
+          getProjectPath(),
+          task,
+          formatTaskForCommitMessage,
+        );
         await telegram.sendBotMessage(chatId, result.message);
         return;
       }

@@ -47,14 +47,6 @@ export function approveCommitForTask(
   task,
   formatTaskForCommitMessage,
 ) {
-  if (!task) {
-    return {
-      ok: false,
-      message:
-        "⚠️ Chưa có task hoàn tất gần nhất để dùng làm commit message. Hãy chạy /run trước.",
-    };
-  }
-
   const status = runGitCommand(projectPath, ["status", "--porcelain"]);
   if (status.status !== 0) {
     const detail =
@@ -69,6 +61,14 @@ export function approveCommitForTask(
     return {
       ok: true,
       message: "🫥 Không có thay đổi nào để commit.",
+    };
+  }
+
+  if (!task) {
+    return {
+      ok: false,
+      message:
+        "⚠️ Có thay đổi Git nhưng chưa xác định được task hoàn tất để dùng làm commit message.",
     };
   }
 
@@ -126,6 +126,26 @@ export function approveCommitForTask(
   return {
     ok: true,
     message: response.join("\n"),
+  };
+}
+
+export function hasGitChanges(projectPath) {
+  const status = runGitCommand(projectPath, ["status", "--porcelain"]);
+
+  if (status.status !== 0) {
+    const detail =
+      status.stderr?.trim() || status.stdout?.trim() || "git status thất bại.";
+    return {
+      ok: false,
+      hasChanges: false,
+      message: `❌ Không thể đọc git status: ${detail}`,
+    };
+  }
+
+  return {
+    ok: true,
+    hasChanges: Boolean(status.stdout.trim()),
+    message: "",
   };
 }
 
