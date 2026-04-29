@@ -257,3 +257,29 @@ export function getDiffViewerData(projectPath) {
     message: files.length ? "" : "Không có thay đổi nào trong working tree.",
   };
 }
+
+export function getCombinedDiffText(projectPath) {
+  const data = getDiffViewerData(projectPath);
+  if (!data.repoReady || !data.files.length) {
+    return {
+      ok: false,
+      message: data.message || "Không có diff để giải thích.",
+      files: data.files || [],
+    };
+  }
+
+  const sections = data.files
+    .map((file) => {
+      const diff = file.diff?.trim() || "(Không có nội dung diff để hiển thị)";
+      return [`File: ${file.path}`, `Status: ${file.status}`, "", diff].join(
+        "\n",
+      );
+    })
+    .join("\n\n");
+
+  return {
+    ok: true,
+    diff: sections,
+    files: data.files,
+  };
+}

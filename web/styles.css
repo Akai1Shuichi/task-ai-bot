@@ -81,6 +81,7 @@ body {
 }
 
 button {
+  appearance: none;
   border: 0;
   border-radius: 999px;
   padding: 12px 18px;
@@ -89,6 +90,24 @@ button {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button--secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(157, 176, 207, 0.18);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.button--secondary:hover:not(:disabled) {
+  background: rgba(76, 201, 240, 0.12);
+  border-color: rgba(76, 201, 240, 0.34);
 }
 
 button:disabled {
@@ -158,6 +177,25 @@ button:disabled {
 .panel__header h2 {
   margin: 0;
   font-size: 20px;
+}
+
+.panel__header--stack {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.panel__title-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .badge {
@@ -365,6 +403,21 @@ button:disabled {
   display: none;
 }
 
+.action-status {
+  margin: 0;
+  padding: 14px 20px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.action-status--success {
+  color: #96f3b9;
+}
+
+.action-status--danger {
+  color: #ffc2cb;
+}
+
 .diff-output {
   margin: 0;
   padding: 20px;
@@ -413,6 +466,15 @@ button:disabled {
 
   .hero__actions {
     align-items: flex-start;
+  }
+
+  .panel__actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .panel__actions .button {
+    flex: 1 1 180px;
   }
 
   .summary {

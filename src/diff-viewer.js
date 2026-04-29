@@ -2,6 +2,7 @@ import fs from "fs";
 import http from "http";
 import path from "path";
 import { spawn, spawnSync } from "child_process";
+import crypto from "crypto";
 
 import {
   DIFF_VIEWER_HOST,
@@ -10,13 +11,17 @@ import {
   NGROK_API_URL,
   WEB_ROOT,
 } from "./constants.js";
-import { getDiffViewerData } from "./git.js";
+import { getCombinedDiffText, getDiffViewerData } from "./git.js";
 
-export function createDiffViewerService({ getProjectPath }) {
+export function createDiffViewerService({
+  getProjectPath,
+  requestDiffExplanation,
+}) {
   let diffViewerServer = null;
   let tunnelProcess = null;
   let tunnelPublicUrl = "";
   let tunnelProvider = "";
+  const explainToken = crypto.randomBytes(24).toString("hex");
 
   function getDiffViewerUrl() {
     return `http://${DIFF_VIEWER_HOST}:${DIFF_VIEWER_PORT}`;
@@ -240,6 +245,15 @@ export function createDiffViewerService({ getProjectPath }) {
       );
       const pathname = url.pathname;
 
+      if (pathname === "/api/explain" && req.method === "POST") {
+        void handleExplainRequest(req, res, {
+          explainToken,
+          getProjectPath,
+          requestDiffExplanation,
+        });
+        return;
+      }
+
       if (req.method !== "GET") {
         sendText(res, "Method not allowed", 405);
         return;
@@ -275,6 +289,7 @@ export function createDiffViewerService({ getProjectPath }) {
       if (pathname === "/api/diff") {
         sendJson(res, {
           ...getDiffViewerData(getProjectPath()),
+          explainToken,
           viewerUrl: getDiffViewerUrl(),
           publicViewerUrl: getDiffViewerPublicUrl(),
         });
@@ -338,4 +353,214 @@ function sendStaticFile(res, filePath, contentType) {
   } catch (err) {
     sendText(res, `Not found: ${err.message}`, 404);
   }
+}
+
+async function handleExplainRequest(
+  req,
+  res,
+  { explainToken, getProjectPath, requestDiffExplanation },
+) {
+  if (!requestDiffExplanation) {
+    sendJson(
+      res,
+      {
+        ok: false,
+        message: "Tính năng explain chưa được cấu hình trên server.",
+      },
+      503,
+    );
+    return;
+  }
+
+  const token = req.headers["x-diff-viewer-token"];
+  if (!token || token !== explainToken) {
+    sendJson(
+      res,
+      {
+        ok: false,
+        message: "Thiếu hoặc sai token truy cập explain.",
+      },
+      403,
+    );
+    return;
+  }
+
+  try {
+    const payload = await readJsonBody(req);
+    const request = buildExplainRequest(getProjectPath(), payload);
+
+    if (!request.ok) {
+      sendJson(res, request, request.statusCode || 400);
+      return;
+    }
+
+    const result = await Promise.resolve(
+      requestDiffExplanation({
+        prompt: request.prompt,
+        task: request.task,
+      }),
+    );
+
+    sendJson(
+      res,
+      {
+        ok: Boolean(result?.ok),
+        message:
+          result?.message ||
+          "Đã gửi yêu cầu explain cho Codex. Kết quả sẽ trả về Telegram.",
+      },
+      result?.ok ? 202 : 409,
+    );
+  } catch (err) {
+    sendJson(
+      res,
+      {
+        ok: false,
+        message: `Không thể xử lý yêu cầu explain: ${err.message}`,
+      },
+      400,
+    );
+  }
+}
+
+function buildExplainRequest(projectPath, payload) {
+  const scope = String(payload?.scope || "").trim();
+
+  if (scope === "all") {
+    const combined = getCombinedDiffText(projectPath);
+    if (!combined.ok) {
+      return {
+        ok: false,
+        statusCode: 400,
+        message: combined.message || "Không có diff để giải thích.",
+      };
+    }
+
+    return {
+      ok: true,
+      task: "giải thích toàn bộ diff",
+      prompt: buildAllDiffExplainPrompt(combined.diff),
+    };
+  }
+
+  if (scope === "file") {
+    const filePath = String(payload?.filePath || "").trim();
+    if (!filePath) {
+      return {
+        ok: false,
+        statusCode: 400,
+        message: "Thiếu đường dẫn file để explain.",
+      };
+    }
+
+    const data = getDiffViewerData(projectPath);
+    const file = data.files.find((entry) => entry.path === filePath);
+    if (!file) {
+      return {
+        ok: false,
+        statusCode: 404,
+        message: `Không tìm thấy file trong diff hiện tại: ${filePath}`,
+      };
+    }
+
+    if (!isExplainableFileStatus(file.status)) {
+      return {
+        ok: false,
+        statusCode: 400,
+        message: "Chỉ hỗ trợ explain riêng cho file add hoặc edit.",
+      };
+    }
+
+    if (!file.diff?.trim()) {
+      return {
+        ok: false,
+        statusCode: 400,
+        message: "File này hiện không có nội dung diff để giải thích.",
+      };
+    }
+
+    return {
+      ok: true,
+      task: `giải thích file ${file.path}`,
+      prompt: buildSingleFileExplainPrompt(file),
+    };
+  }
+
+  return {
+    ok: false,
+    statusCode: 400,
+    message: "Scope explain không hợp lệ.",
+  };
+}
+
+function isExplainableFileStatus(status) {
+  return status === "??" || status.includes("A") || status.includes("M");
+}
+
+function buildAllDiffExplainPrompt(diffText) {
+  return [
+    "Bạn đang nhận một git diff của toàn bộ project.",
+    "Chỉ giải thích diff, không sửa file, không đề xuất chạy lệnh nếu không thực sự cần.",
+    "Hãy trả lời bằng tiếng Việt, ngắn gọn nhưng đủ ý.",
+    "",
+    "Yêu cầu:",
+    "1. Tóm tắt mục đích thay đổi tổng thể.",
+    "2. Giải thích theo từng file: file đó thay đổi gì và để làm gì.",
+    "3. Chỉ ra rủi ro, chỗ dễ lỗi, hoặc điểm cần review thêm nếu có.",
+    "4. Nếu có file mới, nói rõ vai trò của file đó trong luồng hiện tại.",
+    "",
+    "Git diff:",
+    truncatePromptDiff(diffText),
+  ].join("\n");
+}
+
+function buildSingleFileExplainPrompt(file) {
+  return [
+    "Bạn đang nhận git diff của một file trong project.",
+    "Chỉ giải thích diff, không sửa file.",
+    "Trả lời bằng tiếng Việt, thực dụng, dễ đọc trên Telegram.",
+    "",
+    `File: ${file.path}`,
+    `Status: ${file.status}`,
+    "",
+    "Yêu cầu:",
+    "1. File này đang được thêm mới hay chỉnh sửa gì.",
+    "2. Những thay đổi chính trong logic hoặc giao diện là gì.",
+    "3. Tác động thực tế của thay đổi này đối với app.",
+    "4. Nếu có rủi ro hoặc điểm cần review kỹ thì nêu rõ.",
+    "",
+    "Git diff:",
+    truncatePromptDiff(file.diff),
+  ].join("\n");
+}
+
+function truncatePromptDiff(diffText, limit = 160000) {
+  const clean = String(diffText || "").trim();
+  if (clean.length <= limit) return clean;
+
+  return [
+    clean.slice(0, limit),
+    "",
+    "[Diff đã bị cắt bớt vì quá dài. Hãy giải thích dựa trên phần diff còn lại.]",
+  ].join("\n");
+}
+
+async function readJsonBody(req, limit = 64 * 1024) {
+  const chunks = [];
+  let total = 0;
+
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > limit) {
+      throw new Error("Request body quá lớn.");
+    }
+    chunks.push(chunk);
+  }
+
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (!text) {
+    throw new Error("Request body rỗng.");
+  }
+
+  return JSON.parse(text);
 }

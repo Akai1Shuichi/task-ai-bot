@@ -9,9 +9,13 @@ const fileList = document.querySelector("#file-list");
 const diffTitle = document.querySelector("#diff-title");
 const diffStatus = document.querySelector("#diff-status");
 const diffOutput = document.querySelector("#diff-output");
+const explainAllButton = document.querySelector("#explain-all-button");
+const explainFileButton = document.querySelector("#explain-file-button");
+const actionStatus = document.querySelector("#action-status");
 
 let currentData = null;
 let selectedPath = "";
+let explainRequestPending = false;
 const closedDirectories = new Set();
 
 function escapeHtml(text) {
@@ -46,6 +50,25 @@ function statusTone(status) {
 function applyDiffStatusTone(status) {
   const tone = statusTone(status);
   diffStatus.className = `badge badge--${tone}`;
+}
+
+function isExplainableFile(file) {
+  if (!file) return false;
+  return file.status === "??" || file.status.includes("A") || file.status.includes("M");
+}
+
+function setActionStatus(text, tone = "muted") {
+  actionStatus.textContent = text;
+  actionStatus.className = `action-status action-status--${tone}`;
+}
+
+function syncExplainButtons(file = null) {
+  const hasFiles = Boolean(currentData?.files?.length);
+  const explainFileVisible = isExplainableFile(file);
+
+  explainAllButton.disabled = explainRequestPending || !hasFiles;
+  explainFileButton.hidden = !explainFileVisible;
+  explainFileButton.disabled = explainRequestPending || !explainFileVisible;
 }
 
 function renderDiff(diff) {
@@ -215,6 +238,7 @@ function selectFile(filePath) {
     diffStatus.textContent = "No file selected";
     diffStatus.className = "badge badge--muted";
     diffOutput.textContent = "Chọn một file bên trái để xem diff.";
+    syncExplainButtons(null);
     return;
   }
 
@@ -222,6 +246,7 @@ function selectFile(filePath) {
   diffStatus.textContent = badgeLabel(file.status);
   applyDiffStatusTone(file.status);
   renderDiff(file.diff);
+  syncExplainButtons(file);
 }
 
 function renderFiles(files) {
@@ -254,7 +279,47 @@ function render(data) {
   updatedAt.textContent = `Updated: ${formatTimestamp(data.generatedAt)}`;
   repoState.textContent = data.repoReady ? "Git Ready" : "No Git Repo";
   repoState.classList.toggle("badge--warning", !data.repoReady);
+  if (!data.files?.length) {
+    setActionStatus("Không có diff để gửi cho Codex.", "muted");
+  }
   renderFiles(data.files || []);
+}
+
+async function requestExplain(scope, filePath = "") {
+  if (explainRequestPending) return;
+
+  explainRequestPending = true;
+  syncExplainButtons(currentData?.files?.find((entry) => entry.path === selectedPath));
+  setActionStatus("Đang gửi yêu cầu cho Codex...", "muted");
+
+  try {
+    const response = await fetch("./api/explain", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Diff-Viewer-Token": currentData?.explainToken || "",
+      },
+      body: JSON.stringify({
+        scope,
+        filePath,
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message || `Request failed with status ${response.status}`);
+    }
+
+    setActionStatus(
+      data.message || "Đã gửi yêu cầu cho Codex. Kết quả sẽ trả về Telegram.",
+      "success",
+    );
+  } catch (error) {
+    setActionStatus(`Không gửi được explain: ${error.message}`, "danger");
+  } finally {
+    explainRequestPending = false;
+    syncExplainButtons(currentData?.files?.find((entry) => entry.path === selectedPath));
+  }
 }
 
 async function loadDiffs() {
@@ -280,6 +345,15 @@ async function loadDiffs() {
 
 refreshButton?.addEventListener("click", () => {
   void loadDiffs();
+});
+
+explainAllButton?.addEventListener("click", () => {
+  void requestExplain("all");
+});
+
+explainFileButton?.addEventListener("click", () => {
+  if (!selectedPath) return;
+  void requestExplain("file", selectedPath);
 });
 
 void loadDiffs();

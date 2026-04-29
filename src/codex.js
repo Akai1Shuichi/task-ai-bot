@@ -6,6 +6,7 @@ import {
   STOP_FORCE_KILL_MS,
   TELEGRAM_LIMIT,
 } from "./constants.js";
+import { isCodexThreadId } from "./session.js";
 
 export function createCodexService({
   bot,
@@ -66,7 +67,7 @@ export function createCodexService({
     ].join("\n");
   }
 
-  function startTask(chatId, task, prompt = "") {
+  function startTask(chatId, task, prompt = "", options = {}) {
     if (activeCodexRun) {
       return sendBotMessage(
         chatId,
@@ -85,7 +86,13 @@ export function createCodexService({
       startedAt: Date.now(),
     };
 
-    activeCodexRun = runCodexRealtime(chatId, task, activeCodexJob, prompt)
+    activeCodexRun = runCodexRealtime(
+      chatId,
+      task,
+      activeCodexJob,
+      prompt,
+      options,
+    )
       .catch((err) => {
         sendBotMessage(chatId, `Không thể chạy Codex: ${err.message}`);
       })
@@ -127,6 +134,29 @@ export function createCodexService({
     );
   }
 
+  function queueExternalTask(chatId, task, prompt, options = {}) {
+    if (activeCodexRun) {
+      return {
+        ok: false,
+        message: "⏳ Codex đang chạy. Hãy đợi hoàn tất hoặc dùng /stop.",
+      };
+    }
+
+    startTask(chatId, task, prompt, options);
+    return {
+      ok: true,
+      message: `Đã gửi yêu cầu "${task}" cho Codex. Kết quả sẽ trả về Telegram.`,
+    };
+  }
+
+  function queueDiffExplanation(chatId, task, prompt) {
+    return queueExternalTask(chatId, task, prompt, {
+      notifyApproveCommit: false,
+      recordAsLastCompletedTask: false,
+      sessionMode: "isolated",
+    });
+  }
+
   async function stopActiveJob(chatId) {
     if (!activeCodexJob) {
       const projectPath = getProjectPath();
@@ -164,11 +194,19 @@ export function createCodexService({
     );
   }
 
-  async function runCodexRealtime(chatId, task, job, promptOverride = "") {
+  async function runCodexRealtime(
+    chatId,
+    task,
+    job,
+    promptOverride = "",
+    options = {},
+  ) {
     const projectPath = getProjectPath();
     const todoPath = getTodoPath();
     const prompt = promptOverride || `Read ${todoPath} and complete task ${task}`;
-    const savedSession = readCodexSession(projectPath);
+    const sessionMode = options.sessionMode || "reuse";
+    const shouldReuseSession = sessionMode !== "isolated";
+    const savedSession = shouldReuseSession ? readCodexSession(projectPath) : null;
     const liveMessage = await bot.sendMessage(
       chatId,
       `Đang chạy ${task}\n\n${
@@ -254,7 +292,9 @@ export function createCodexService({
       if (!isCodexThreadId(threadId)) return;
 
       activeThreadId = threadId;
-      saveCodexSession(projectPath, threadId);
+      if (shouldReuseSession) {
+        saveCodexSession(projectPath, threadId);
+      }
 
       if (!sessionLineAdded) {
         sessionLineAdded = true;
@@ -294,20 +334,24 @@ export function createCodexService({
           if (
             code !== 0 &&
             savedSession &&
+            shouldReuseSession &&
             /not found|no such|failed to load/i.test(output)
           ) {
             clearCodexSession();
             append(
               "Phiên Codex đã lưu không hợp lệ. Chạy lại /run để bắt đầu phiên mới.",
             );
-          } else if (code === 0 && activeThreadId) {
+          } else if (code === 0 && activeThreadId && shouldReuseSession) {
             saveCodexSession(projectPath, activeThreadId);
           }
 
-          const completedSuccessfully =
-            code === 0 && !job?.stopRequested && task !== "duyệt commit";
+          const completedSuccessfully = code === 0 && !job?.stopRequested;
 
-          if (completedSuccessfully) {
+          if (
+            completedSuccessfully &&
+            options.recordAsLastCompletedTask !== false &&
+            task !== "duyệt commit"
+          ) {
             lastCompletedTask = task;
           }
 
@@ -333,7 +377,7 @@ export function createCodexService({
             await sendLongMessage(chatId, output);
           }
 
-          if (completedSuccessfully) {
+          if (completedSuccessfully && options.notifyApproveCommit !== false) {
             await sendApproveCommitPrompt(chatId, task);
           }
         } catch (err) {
@@ -349,6 +393,8 @@ export function createCodexService({
     getLastCompletedTask,
     getStatusText,
     isRunning,
+    queueDiffExplanation,
+    queueExternalTask,
     startFollowup,
     startTask,
     stopActiveJob,

@@ -48,10 +48,34 @@
         </aside>
 
         <section class="diff panel">
-          <div class="panel__header">
-            <h2 id="diff-title">Select a file</h2>
-            <span id="diff-status" class="badge badge--muted">No file selected</span>
+          <div class="panel__header panel__header--stack">
+            <div class="panel__title-group">
+              <h2 id="diff-title">Select a file</h2>
+              <span id="diff-status" class="badge badge--muted">No file selected</span>
+            </div>
+            <div class="panel__actions">
+              <button
+                id="explain-all-button"
+                type="button"
+                class="button button--secondary"
+                disabled
+              >
+                Explain All
+              </button>
+              <button
+                id="explain-file-button"
+                type="button"
+                class="button button--secondary"
+                disabled
+                hidden
+              >
+                Explain File
+              </button>
+            </div>
           </div>
+          <p id="action-status" class="action-status" aria-live="polite">
+            Bấm Explain để gửi yêu cầu cho Codex. Kết quả sẽ trả về Telegram.
+          </p>
           <pre id="diff-output" class="diff-output">Chọn một file bên trái để xem diff.</pre>
         </section>
       </section>

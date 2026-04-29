@@ -26,7 +26,6 @@ export async function bootstrapBot() {
     allowedChatId: ALLOWED_CHAT_ID,
   });
   const todo = createTodoService({ readTodo });
-  const diffViewer = createDiffViewerService({ getProjectPath });
 
   async function sendApproveCommitPrompt(chatId, task) {
     if (!task) return;
@@ -65,6 +64,12 @@ export async function bootstrapBot() {
     safeEditMessage: telegram.safeEditMessage,
     sendLongMessage: telegram.sendLongMessage,
     sendApproveCommitPrompt,
+  });
+
+  const diffViewer = createDiffViewerService({
+    getProjectPath,
+    requestDiffExplanation: ({ task, prompt }) =>
+      codex.queueDiffExplanation(ALLOWED_CHAT_ID, task, prompt),
   });
 
   function approveCommitForLastTask() {
