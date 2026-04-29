@@ -181,6 +181,27 @@ button:disabled {
   color: var(--muted);
 }
 
+.badge--added {
+  background: rgba(40, 199, 111, 0.14);
+  color: #96f3b9;
+}
+
+.badge--modified {
+  background: rgba(255, 176, 32, 0.16);
+  color: #ffd37a;
+}
+
+.badge--deleted {
+  background: rgba(255, 93, 115, 0.16);
+  color: #ffc2cb;
+}
+
+.badge--renamed,
+.badge--changed {
+  background: rgba(76, 201, 240, 0.16);
+  color: #9ceaff;
+}
+
 .file-list {
   list-style: none;
   margin: 0;
@@ -283,6 +304,26 @@ button:disabled {
   box-shadow: 0 0 0 4px rgba(76, 201, 240, 0.08);
 }
 
+.file-tree__dot--added {
+  background: linear-gradient(135deg, #1fcf78, #7ff2b0);
+  box-shadow: 0 0 0 4px rgba(40, 199, 111, 0.12);
+}
+
+.file-tree__dot--modified {
+  background: linear-gradient(135deg, #ff9f1c, #ffd166);
+  box-shadow: 0 0 0 4px rgba(255, 176, 32, 0.12);
+}
+
+.file-tree__dot--deleted {
+  background: linear-gradient(135deg, #ff5d73, #ff9eb0);
+  box-shadow: 0 0 0 4px rgba(255, 93, 115, 0.12);
+}
+
+.file-tree__dot--renamed,
+.file-tree__dot--changed {
+  background: linear-gradient(135deg, #4cc9f0, #8fe8ff);
+}
+
 .file-tree__name {
   color: var(--text);
   font-weight: 700;
@@ -293,9 +334,25 @@ button:disabled {
 .file-tree__status {
   flex: 0 0 auto;
   font-size: 12px;
-  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.file-tree__status--added {
+  color: #96f3b9;
+}
+
+.file-tree__status--modified {
+  color: #ffd37a;
+}
+
+.file-tree__status--deleted {
+  color: #ffc2cb;
+}
+
+.file-tree__status--renamed,
+.file-tree__status--changed {
+  color: #9ceaff;
 }
 
 .empty-state {

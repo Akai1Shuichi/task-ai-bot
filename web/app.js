@@ -12,7 +12,7 @@ const diffOutput = document.querySelector("#diff-output");
 
 let currentData = null;
 let selectedPath = "";
-const openDirectories = new Set();
+const closedDirectories = new Set();
 
 function escapeHtml(text) {
   return text
@@ -33,6 +33,19 @@ function badgeLabel(status) {
   if (status.includes("D")) return "Deleted";
   if (status.includes("R")) return "Renamed";
   return status.trim() || "Changed";
+}
+
+function statusTone(status) {
+  if (status === "??" || status.includes("A")) return "added";
+  if (status.includes("D")) return "deleted";
+  if (status.includes("M")) return "modified";
+  if (status.includes("R")) return "renamed";
+  return "changed";
+}
+
+function applyDiffStatusTone(status) {
+  const tone = statusTone(status);
+  diffStatus.className = `badge badge--${tone}`;
 }
 
 function renderDiff(diff) {
@@ -109,9 +122,7 @@ function buildFileTree(files) {
 }
 
 function shouldOpenDirectory(directoryPath) {
-  if (openDirectories.has(directoryPath)) return true;
-  if (!selectedPath) return true;
-  return selectedPath.startsWith(`${directoryPath}/`);
+  return !closedDirectories.has(directoryPath);
 }
 
 function createFileNode(file) {
@@ -128,7 +139,7 @@ function createFileNode(file) {
   nameRow.className = "file-tree__name-row";
 
   const dot = document.createElement("span");
-  dot.className = "file-tree__dot";
+  dot.className = `file-tree__dot file-tree__dot--${statusTone(file.status)}`;
   dot.setAttribute("aria-hidden", "true");
 
   const name = document.createElement("span");
@@ -136,7 +147,7 @@ function createFileNode(file) {
   name.textContent = file.name;
 
   const status = document.createElement("span");
-  status.className = "file-tree__status";
+  status.className = `file-tree__status file-tree__status--${statusTone(file.status)}`;
   status.textContent = badgeLabel(file.status);
 
   nameRow.append(dot, name);
@@ -154,9 +165,9 @@ function createDirectoryNode(directory) {
   branch.open = shouldOpenDirectory(directory.path);
   branch.addEventListener("toggle", () => {
     if (branch.open) {
-      openDirectories.add(directory.path);
+      closedDirectories.delete(directory.path);
     } else {
-      openDirectories.delete(directory.path);
+      closedDirectories.add(directory.path);
     }
   });
 
@@ -202,12 +213,14 @@ function selectFile(filePath) {
   if (!file) {
     diffTitle.textContent = "Select a file";
     diffStatus.textContent = "No file selected";
+    diffStatus.className = "badge badge--muted";
     diffOutput.textContent = "Chọn một file bên trái để xem diff.";
     return;
   }
 
   diffTitle.textContent = file.path;
   diffStatus.textContent = badgeLabel(file.status);
+  applyDiffStatusTone(file.status);
   renderDiff(file.diff);
 }
 
