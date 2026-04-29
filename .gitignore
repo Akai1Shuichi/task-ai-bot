@@ -4,3 +4,5 @@
 .codex
 .env
 config.json
+*.log
+.DS_Store
