@@ -12,6 +12,7 @@ const diffOutput = document.querySelector("#diff-output");
 
 let currentData = null;
 let selectedPath = "";
+const openDirectories = new Set();
 
 function escapeHtml(text) {
   return text
@@ -57,11 +58,144 @@ function renderDiff(diff) {
   diffOutput.innerHTML = html;
 }
 
+function splitPath(filePath) {
+  return String(filePath || "")
+    .split(/[\\/]+/)
+    .filter(Boolean);
+}
+
+function sortByLabel(a, b) {
+  return a.localeCompare(b, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function buildFileTree(files) {
+  const root = {
+    directories: new Map(),
+    files: [],
+  };
+
+  for (const file of files) {
+    const segments = splitPath(file.path);
+    if (!segments.length) continue;
+
+    let node = root;
+    let currentPath = "";
+
+    for (const segment of segments.slice(0, -1)) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+
+      if (!node.directories.has(segment)) {
+        node.directories.set(segment, {
+          name: segment,
+          path: currentPath,
+          directories: new Map(),
+          files: [],
+        });
+      }
+
+      node = node.directories.get(segment);
+    }
+
+    node.files.push({
+      ...file,
+      name: segments[segments.length - 1],
+    });
+  }
+
+  return root;
+}
+
+function shouldOpenDirectory(directoryPath) {
+  if (openDirectories.has(directoryPath)) return true;
+  if (!selectedPath) return true;
+  return selectedPath.startsWith(`${directoryPath}/`);
+}
+
+function createFileNode(file) {
+  const item = document.createElement("li");
+  item.className = "file-tree__item file-tree__item--file";
+  item.dataset.path = file.path;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "file-tree__button";
+  button.title = file.path;
+  button.addEventListener("click", () => selectFile(file.path));
+
+  const nameRow = document.createElement("span");
+  nameRow.className = "file-tree__name-row";
+
+  const dot = document.createElement("span");
+  dot.className = "file-tree__dot";
+  dot.setAttribute("aria-hidden", "true");
+
+  const name = document.createElement("span");
+  name.className = "file-tree__name";
+  name.textContent = file.name;
+
+  const status = document.createElement("span");
+  status.className = "file-tree__status";
+  status.textContent = badgeLabel(file.status);
+
+  nameRow.append(dot, name);
+  button.append(nameRow, status);
+  item.appendChild(button);
+  return item;
+}
+
+function createDirectoryNode(directory) {
+  const item = document.createElement("li");
+  item.className = "file-tree__item file-tree__item--directory";
+
+  const branch = document.createElement("details");
+  branch.className = "file-tree__branch";
+  branch.open = shouldOpenDirectory(directory.path);
+  branch.addEventListener("toggle", () => {
+    if (branch.open) {
+      openDirectories.add(directory.path);
+    } else {
+      openDirectories.delete(directory.path);
+    }
+  });
+
+  const summary = document.createElement("summary");
+  summary.className = "file-tree__summary";
+  const folderName = document.createElement("span");
+  folderName.className = "file-tree__folder-name";
+  folderName.textContent = directory.name;
+  summary.appendChild(folderName);
+
+  branch.appendChild(summary);
+  branch.appendChild(renderTreeLevel(directory));
+  item.appendChild(branch);
+
+  return item;
+}
+
+function renderTreeLevel(node) {
+  const list = document.createElement("ul");
+  list.className = "file-tree__list";
+
+  const directoryNames = [...node.directories.keys()].sort(sortByLabel);
+  for (const name of directoryNames) {
+    list.appendChild(createDirectoryNode(node.directories.get(name)));
+  }
+
+  const files = [...node.files].sort((a, b) => sortByLabel(a.name, b.name));
+  for (const file of files) {
+    list.appendChild(createFileNode(file));
+  }
+
+  return list;
+}
+
 function selectFile(filePath) {
   selectedPath = filePath;
   const file = currentData?.files?.find((entry) => entry.path === filePath);
 
-  document.querySelectorAll(".file-list__item").forEach((item) => {
+  document.querySelectorAll(".file-tree__item--file").forEach((item) => {
     item.classList.toggle("is-active", item.dataset.path === filePath);
   });
 
@@ -83,32 +217,19 @@ function renderFiles(files) {
   if (!files.length) {
     emptyState.classList.remove("hidden");
     emptyState.textContent = currentData?.message || "Không có file thay đổi.";
+    selectedPath = "";
     selectFile("");
     return;
   }
 
   emptyState.classList.add("hidden");
-  const fragment = document.createDocumentFragment();
-
-  for (const file of files) {
-    const item = document.createElement("li");
-    item.className = "file-list__item";
-    item.dataset.path = file.path;
-    item.innerHTML = `
-      <button type="button" class="file-list__button">
-        <span class="file-list__path">${file.path}</span>
-        <span class="file-list__status">${badgeLabel(file.status)}</span>
-      </button>
-    `;
-    item.querySelector("button").addEventListener("click", () => selectFile(file.path));
-    fragment.appendChild(item);
-  }
-
-  fileList.appendChild(fragment);
-
   const nextPath = files.some((file) => file.path === selectedPath)
     ? selectedPath
     : files[0].path;
+  selectedPath = nextPath;
+
+  const tree = renderTreeLevel(buildFileTree(files));
+  fileList.replaceChildren(...Array.from(tree.children));
   selectFile(nextPath);
 }
 

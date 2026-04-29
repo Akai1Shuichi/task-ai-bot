@@ -187,43 +187,111 @@ button:disabled {
   padding: 10px;
 }
 
-.file-list__item + .file-list__item {
-  margin-top: 10px;
+.file-tree__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.file-list__button {
+.file-tree__branch > .file-tree__list {
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+.file-tree__item + .file-tree__item {
+  margin-top: 8px;
+}
+
+.file-tree__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.file-tree__summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.file-tree__summary::-webkit-details-marker {
+  display: none;
+}
+
+.file-tree__summary::before {
+  content: "▸";
+  color: var(--accent);
+  font-size: 12px;
+  transition: transform 120ms ease;
+}
+
+.file-tree__branch[open] > .file-tree__summary::before {
+  transform: rotate(90deg);
+}
+
+.file-tree__folder-name {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.file-tree__button {
   width: 100%;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 14px 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: 14px;
+  color: var(--text);
   background: rgba(255, 255, 255, 0.03);
+  font: inherit;
+  font-weight: 400;
   transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
 }
 
-.file-list__button:hover {
+.file-tree__button:hover {
   transform: translateY(-1px);
   border-color: rgba(76, 201, 240, 0.28);
   background: rgba(76, 201, 240, 0.08);
 }
 
-.file-list__item.is-active .file-list__button {
+.file-tree__item.is-active > .file-tree__button {
   border-color: rgba(124, 92, 255, 0.42);
   background: rgba(124, 92, 255, 0.14);
 }
 
-.file-list__path {
-  width: 100%;
+.file-tree__name-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-tree__dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 0 4px rgba(76, 201, 240, 0.08);
+}
+
+.file-tree__name {
   color: var(--text);
   font-weight: 700;
   text-align: left;
   word-break: break-word;
 }
 
-.file-list__status {
+.file-tree__status {
+  flex: 0 0 auto;
   font-size: 12px;
   color: var(--muted);
   text-transform: uppercase;
