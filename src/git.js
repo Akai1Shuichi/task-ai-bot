@@ -47,15 +47,6 @@ export function approveCommitForTask(
   task,
   formatTaskForCommitMessage,
 ) {
-  const gitState = ensureProjectGitRepo(projectPath);
-
-  if (!gitState.ok) {
-    return {
-      ok: false,
-      message: `❌ Không thể chuẩn bị git repo cho /approve_commit: ${gitState.error}`,
-    };
-  }
-
   if (!task) {
     return {
       ok: false,
@@ -126,11 +117,6 @@ export function approveCommitForTask(
   }
 
   const response = [];
-  if (gitState.initialized) {
-    response.push(
-      `🆕 Project chưa có git repo. Đã chạy \`git init\` tại:\n${projectPath}`,
-    );
-  }
   response.push(`✅ Đã tạo commit với message: ${commitMessage}`);
   if (commit.stdout.trim()) {
     response.push("");

@@ -11,7 +11,7 @@ import {
 } from "./config.js";
 import { createCodexService } from "./codex.js";
 import { createDiffViewerService } from "./diff-viewer.js";
-import { approveCommitForTask } from "./git.js";
+import { approveCommitForTask, ensureProjectGitRepo } from "./git.js";
 import {
   clearCodexSession,
   readCodexSession,
@@ -27,8 +27,54 @@ export async function bootstrapBot() {
   });
   const todo = createTodoService({ readTodo });
 
+  function getGitReadyMessage(result) {
+    if (!result?.ok) {
+      return `❌ Không thể tự tạo git repo cho project: ${result?.error || "lỗi không xác định"}`;
+    }
+    if (!result.initialized) return "";
+    return [
+      "🆕 Project chưa có git repo.",
+      `Đã tự chạy \`git init\` tại: ${getProjectPath()}`,
+    ].join("\n");
+  }
+
+  function ensureGitReady(chatId = "") {
+    const result = ensureProjectGitRepo(getProjectPath());
+    if (!result.ok && chatId) {
+      telegram.sendBotMessage(chatId, getGitReadyMessage(result));
+    }
+    if (result.ok && result.initialized && chatId) {
+      telegram.sendBotMessage(chatId, getGitReadyMessage(result));
+    }
+    return result;
+  }
+
   async function sendApproveCommitPrompt(chatId, task) {
     if (!task) return;
+
+    const diffLines = [
+      `🌐 Diff viewer: ${diffViewer.getDiffViewerUrl()}`,
+      diffViewer.getDiffViewerPublicUrl()
+        ? `🚀 Public diff: ${diffViewer.getDiffViewerPublicUrl()}`
+        : "🚧 Public diff: chưa khả dụng",
+    ];
+    const inlineKeyboard = [];
+
+    if (diffViewer.getDiffViewerPublicUrl()) {
+      inlineKeyboard.push([
+        {
+          text: "🚀 Mở Diff Viewer",
+          url: diffViewer.getDiffViewerPublicUrl(),
+        },
+      ]);
+    }
+
+    inlineKeyboard.push([
+      {
+        text: "✅ Commit luôn",
+        callback_data: "approve_commit",
+      },
+    ]);
 
     await telegram.bot.sendMessage(
       chatId,
@@ -36,18 +82,13 @@ export async function bootstrapBot() {
         "✅ Codex đã hoàn tất task.",
         `🧩 Task gần nhất: ${formatTaskForCommitMessage(task)}`,
         "",
+        ...diffLines,
+        "",
         "Bạn có muốn commit luôn không?",
       ].join("\n"),
       {
         reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: "✅ Commit luôn",
-                callback_data: "approve_commit",
-              },
-            ],
-          ],
+          inline_keyboard: inlineKeyboard,
         },
       },
     );
@@ -174,6 +215,8 @@ export async function bootstrapBot() {
 
     telegram.bot.onText(/\/run (.+)/, (msg, match) => {
       if (!telegram.auth(msg)) return;
+      const gitReady = ensureGitReady(msg.chat.id);
+      if (!gitReady.ok) return;
       const id = match[1].trim();
       const task = todo.findTask(id);
       if (!task) {
@@ -275,6 +318,17 @@ export async function bootstrapBot() {
         if (query.id) {
           await telegram.bot.answerCallbackQuery(query.id, {
             text: `Không tìm thấy task ${id}.`,
+            show_alert: true,
+          });
+        }
+        return;
+      }
+
+      const gitReady = ensureGitReady(chatId);
+      if (!gitReady.ok) {
+        if (query.id) {
+          await telegram.bot.answerCallbackQuery(query.id, {
+            text: "Không thể chuẩn bị git repo.",
             show_alert: true,
           });
         }

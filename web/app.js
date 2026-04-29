@@ -31,10 +31,9 @@ function formatTimestamp(value) {
 }
 
 function badgeLabel(status) {
-  if (status === "??") return "Untracked";
-  if (status.includes("M")) return "Modified";
-  if (status.includes("A")) return "Added";
+  if (status === "??" || status.includes("A")) return "Added";
   if (status.includes("D")) return "Deleted";
+  if (status.includes("M")) return "Modified";
   if (status.includes("R")) return "Renamed";
   return status.trim() || "Changed";
 }
@@ -54,7 +53,11 @@ function applyDiffStatusTone(status) {
 
 function isExplainableFile(file) {
   if (!file) return false;
-  return file.status === "??" || file.status.includes("A") || file.status.includes("M");
+  return (
+    file.status === "??" ||
+    file.status.includes("A") ||
+    file.status.includes("M")
+  );
 }
 
 function setActionStatus(text, tone = "muted") {
@@ -81,10 +84,17 @@ function renderDiff(diff) {
     .split("\n")
     .map((line) => {
       let className = "diff-line";
-      if (line.startsWith("+") && !line.startsWith("+++")) className += " diff-line--add";
-      else if (line.startsWith("-") && !line.startsWith("---")) className += " diff-line--remove";
+      if (line.startsWith("+") && !line.startsWith("+++"))
+        className += " diff-line--add";
+      else if (line.startsWith("-") && !line.startsWith("---"))
+        className += " diff-line--remove";
       else if (line.startsWith("@@")) className += " diff-line--meta";
-      else if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) {
+      else if (
+        line.startsWith("diff --git") ||
+        line.startsWith("index ") ||
+        line.startsWith("---") ||
+        line.startsWith("+++")
+      ) {
         className += " diff-line--header";
       }
       return `<span class="${className}">${escapeHtml(line)}</span>`;
@@ -289,7 +299,9 @@ async function requestExplain(scope, filePath = "") {
   if (explainRequestPending) return;
 
   explainRequestPending = true;
-  syncExplainButtons(currentData?.files?.find((entry) => entry.path === selectedPath));
+  syncExplainButtons(
+    currentData?.files?.find((entry) => entry.path === selectedPath),
+  );
   setActionStatus("Đang gửi yêu cầu cho Codex...", "muted");
 
   try {
@@ -307,7 +319,9 @@ async function requestExplain(scope, filePath = "") {
     const data = await response.json();
 
     if (!response.ok || !data.ok) {
-      throw new Error(data.message || `Request failed with status ${response.status}`);
+      throw new Error(
+        data.message || `Request failed with status ${response.status}`,
+      );
     }
 
     setActionStatus(
@@ -318,7 +332,9 @@ async function requestExplain(scope, filePath = "") {
     setActionStatus(`Không gửi được explain: ${error.message}`, "danger");
   } finally {
     explainRequestPending = false;
-    syncExplainButtons(currentData?.files?.find((entry) => entry.path === selectedPath));
+    syncExplainButtons(
+      currentData?.files?.find((entry) => entry.path === selectedPath),
+    );
   }
 }
 
