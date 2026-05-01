@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/README/hero.png" alt="Codex Todo Telegram Bot" width="720">
+</p>
+
 # Codex Todo Telegram Bot
 
 Telegram bot để điều khiển `codex` từ xa qua Telegram, theo từng task được viết trong `todo.md` của một project local.
