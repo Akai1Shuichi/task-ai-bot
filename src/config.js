@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
+import { getCodexProcessSpec } from "./codex-cli.js";
 
 import {
   ALLOWED_CHAT_ID,
@@ -146,9 +147,10 @@ export function getStartupValidationErrors() {
     }
   }
 
-  const codexCheck = spawnSync("codex", ["--version"], {
+  const codexProcess = getCodexProcessSpec();
+  const codexCheck = spawnSync(codexProcess.command, ["--version"], {
     stdio: "ignore",
-    shell: false,
+    shell: codexProcess.shell,
   });
   if (codexCheck.error || codexCheck.status !== 0) {
     const detail = codexCheck.error?.message

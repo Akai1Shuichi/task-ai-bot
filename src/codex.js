@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { getCodexProcessSpec } from "./codex-cli.js";
 
 import {
   EDIT_INTERVAL_MS,
@@ -250,10 +251,11 @@ export function createCodexService({
     }
 
     args.push(prompt);
-    const child = spawn("codex", args, {
+    const codexProcess = getCodexProcessSpec();
+    const child = spawn(codexProcess.command, args, {
       cwd: projectPath,
       env: process.env,
-      shell: false,
+      shell: codexProcess.shell,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
