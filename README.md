@@ -4,6 +4,13 @@
 
 # Codex Todo Telegram Bot
 
+<p align="center">
+  <a href="https://qr-donate.vercel.app/">
+    <img src="https://img.shields.io/badge/Support-Donate-EA4AAA?style=for-the-
+  badge&logo=githubsponsors&logoColor=red" alt="Donate">
+  </a>
+</p>
+
 Telegram bot để điều khiển `codex` từ xa qua Telegram, theo từng task được viết trong `todo.md` của một project local.
 
 Phù hợp khi bạn muốn giữ workflow đơn giản:
