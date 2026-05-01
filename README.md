@@ -6,8 +6,7 @@
 
 <p align="center">
   <a href="https://qr-donate.vercel.app/">
-    <img src="https://img.shields.io/badge/Support-Donate-EA4AAA?style=for-the-
-  badge&logo=githubsponsors&logoColor=red" alt="Donate">
+    <img src="https://img.shields.io/badge/Support-Donate-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=red" alt="Donate">
   </a>
 </p>
 
