@@ -37,7 +37,6 @@ export async function bootstrapBot() {
     allowedChatId: ALLOWED_CHAT_ID,
   });
   const todo = createTodoService({ readTodo });
-  const pendingCommitApprovals = new Map();
 
   function getGitReadyMessage(result) {
     if (!result?.ok) {
@@ -59,14 +58,6 @@ export async function bootstrapBot() {
       telegram.sendBotMessage(chatId, getGitReadyMessage(result));
     }
     return result;
-  }
-
-  function storePendingCommitApproval(task) {
-    const token = `${Date.now().toString(36)}${Math.random()
-      .toString(36)
-      .slice(2, 8)}`;
-    pendingCommitApprovals.set(token, task);
-    return token;
   }
 
   function resolveCommitTaskCandidate(taskOverride = "") {
@@ -108,7 +99,6 @@ export async function bootstrapBot() {
     }
 
     const commitMessage = formatTaskForCommitMessage(task);
-    const token = storePendingCommitApproval(task);
     const diffLines = [
       `🌐 Diff viewer: ${diffViewer.getDiffViewerUrl()}`,
       diffViewer.getDiffViewerPublicUrl()
@@ -129,7 +119,7 @@ export async function bootstrapBot() {
     inlineKeyboard.push([
       {
         text: `✅ Commit: ${truncateButtonLabel(commitMessage)}`,
-        callback_data: `commit_task:${token}`,
+        callback_data: `commit_task:${commitMessage}`,
       },
     ]);
 
@@ -569,9 +559,7 @@ export async function bootstrapBot() {
             }
             return;
           }
-          const savedReasoning = setCodexReasoningEffort(
-            nextReasoning,
-          );
+          const savedReasoning = setCodexReasoningEffort(nextReasoning);
           if (!savedReasoning) {
             if (query.id) {
               await telegram.bot.answerCallbackQuery(query.id, {
@@ -606,7 +594,9 @@ export async function bootstrapBot() {
         const payload = buildCommitApprovalPayload();
         if (query.id) {
           await telegram.bot.answerCallbackQuery(query.id, {
-            text: payload.prompt ? "📝 Đã tạo nút xác nhận commit" : "ℹ️ Không có commit để xác nhận",
+            text: payload.prompt
+              ? "📝 Đã tạo nút xác nhận commit"
+              : "ℹ️ Không có commit để xác nhận",
           });
         }
         if (payload.prompt) {
@@ -627,20 +617,24 @@ export async function bootstrapBot() {
           return;
         }
 
-        const token = data.slice("commit_task:".length).trim();
-        const task = pendingCommitApprovals.get(token);
+        const task = data.slice("commit_task:".length).trim();
 
         if (!task) {
+          const payload = buildCommitApprovalPayload();
           if (query.id) {
             await telegram.bot.answerCallbackQuery(query.id, {
-              text: "⚠️ Nút commit này đã hết hạn hoặc không hợp lệ.",
-              show_alert: true,
+              text: payload.prompt
+                ? "Bot đang tạo lại nút commit mới."
+                : "Nút cũ không còn hiệu lực.",
             });
+          }
+          if (payload.prompt) {
+            await telegram.bot.sendMessage(chatId, payload.message, payload.options);
+          } else if (payload.message) {
+            await telegram.sendBotMessage(chatId, payload.message);
           }
           return;
         }
-
-        pendingCommitApprovals.delete(token);
 
         if (query.id) {
           await telegram.bot.answerCallbackQuery(query.id, {
