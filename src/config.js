@@ -6,6 +6,7 @@ import { getCodexProcessSpec } from "./codex-cli.js";
 import {
   ALLOWED_CHAT_ID,
   CONFIG_PATH,
+  DIFF_VIEWER_TUNNEL,
   TELEGRAM_BOT_TOKEN,
 } from "./constants.js";
 
@@ -159,6 +160,7 @@ export function getStartupValidationErrors() {
     errors.push(`Không chạy được lệnh codex${detail}.`);
   }
 
+  errors.push(...getDiffViewerTunnelValidationErrors());
   return errors;
 }
 
@@ -190,4 +192,50 @@ function normalizeCodexReasoningEffort(value) {
   return ["minimal", "low", "medium", "high", "xhigh"].includes(normalized)
     ? normalized
     : null;
+}
+
+function getDiffViewerTunnelValidationErrors() {
+  const tunnel = String(DIFF_VIEWER_TUNNEL || "none").trim().toLowerCase();
+  const allowed = new Set(["none", "cloudflared", "ngrok", "auto"]);
+
+  if (!allowed.has(tunnel)) {
+    return [
+      `DIFF_VIEWER_TUNNEL không hợp lệ: ${DIFF_VIEWER_TUNNEL}. Hỗ trợ: none, cloudflared, ngrok, auto.`,
+    ];
+  }
+
+  if (tunnel === "none") return [];
+
+  if (tunnel === "ngrok" && !isBinaryAvailable("ngrok")) {
+    return [
+      "DIFF_VIEWER_TUNNEL=ngrok nhưng không tìm thấy lệnh `ngrok`. Hãy cài ngrok hoặc đổi DIFF_VIEWER_TUNNEL=none.",
+    ];
+  }
+
+  if (tunnel === "cloudflared" && !isBinaryAvailable("cloudflared")) {
+    return [
+      "DIFF_VIEWER_TUNNEL=cloudflared nhưng không tìm thấy lệnh `cloudflared`. Hãy cài cloudflared hoặc đổi DIFF_VIEWER_TUNNEL=none.",
+    ];
+  }
+
+  if (
+    tunnel === "auto" &&
+    !isBinaryAvailable("cloudflared") &&
+    !isBinaryAvailable("ngrok")
+  ) {
+    return [
+      "DIFF_VIEWER_TUNNEL=auto nhưng không tìm thấy `cloudflared` hoặc `ngrok`. Hãy cài một trong hai hoặc đổi DIFF_VIEWER_TUNNEL=none.",
+    ];
+  }
+
+  return [];
+}
+
+function isBinaryAvailable(binary) {
+  const check = spawnSync(binary, ["--version"], {
+    stdio: "ignore",
+    shell: false,
+  });
+
+  return !check.error && check.status === 0;
 }
